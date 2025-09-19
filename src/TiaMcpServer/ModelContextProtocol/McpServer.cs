@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
+using Siemens.Engineering.SW;
 using Siemens.Engineering.SW.Blocks;
 using System;
 using System.Collections.Generic;
@@ -12,9 +13,8 @@ using System.Linq;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using TiaMcpServer.Siemens;
-using Siemens.Engineering.SW;
 using System.Xml.Linq;
+using TiaMcpServer.Siemens;
 
 namespace TiaMcpServer.ModelContextProtocol
 {
@@ -792,7 +792,7 @@ namespace TiaMcpServer.ModelContextProtocol
         [McpServerTool(Name = "ExportBlock"), Description("Export a block from plc software to file")]
         public static ResponseExportBlock ExportBlock(
             [Description("softwarePath: defines the path in the project structure to the plc software")] string softwarePath,
-            [Description("blockPath: defines the path in the project structure to the block")] string blockPath,
+            [Description("blockPath: full path to the block in the project structure, e.g. 'Group/Subgroup/Name' (single names are ambiguous)")] string blockPath,
             [Description("exportPath: defines the path where to export the block")] string exportPath,
             [Description("preservePath: preserves the path/structure of the plc software")] bool preservePath = false)
         {
@@ -811,10 +811,73 @@ namespace TiaMcpServer.ModelContextProtocol
                         }
                     };
                 }
-                else
+                // Should not be reachable because Portal.ExportBlock throws on failure
+                throw new McpException($"Failed exporting block from '{blockPath}' to '{exportPath}'", McpErrorCode.InternalError);
+            }
+            catch (TiaMcpServer.Siemens.PortalException pex)
+            {
+                // Map known portal errors to sharper MCP errors and messages.
+                switch (pex.Code)
                 {
-                    throw new McpException($"Failed exporting block from '{blockPath}' to '{exportPath}'", McpErrorCode.InternalError);
+                    case TiaMcpServer.Siemens.PortalErrorCode.NotFound:
+                        {
+                            var suggestionNote = string.Empty;
+                            // If the path has no '/', it may be incomplete; build suggestions using Portal's regex search and path resolver
+                            if (!string.IsNullOrEmpty(blockPath) && !blockPath.Contains('/'))
+                            {
+                                try
+                                {
+                                    var escaped = Regex.Escape(blockPath);
+                                    var blocks = Portal.GetBlocks(softwarePath, $"^{escaped}$");
+                                    if (blocks == null || blocks.Count == 0)
+                                    {
+                                        blocks = Portal.GetBlocks(softwarePath, escaped);
+                                    }
+
+                                    var candidates = blocks
+                                        .Take(10)
+                                        .Select(b => Portal.GetBlockPath(b))
+                                        .Where(p => !string.IsNullOrWhiteSpace(p))
+                                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                                        .ToList();
+
+                                    if (candidates.Count > 0)
+                                    {
+                                        suggestionNote = $" Did you mean: {string.Join(", ", candidates)}?";
+                                    }
+                                }
+                                catch
+                                {
+                                    // Best-effort suggestions only
+                                }
+                            }
+
+                            var msg = $"Block not found.{suggestionNote}".Trim();
+                            throw new McpException(msg, McpErrorCode.InvalidParams);
+                        }
+
+                    case TiaMcpServer.Siemens.PortalErrorCode.ExportFailed:
+                        {
+                            // Relay underlying portal error with concise reason; log full details
+                            var reason = pex.InnerException?.Message?.Trim();
+                            var msg = "Failed to export block.";
+                            if (!string.IsNullOrEmpty(reason)) msg += $" Reason: {reason}";
+
+                            Logger?.LogError(pex, "MCP ExportBlock failed for {SoftwarePath} {BlockPath} -> {ExportPath}",
+                                pex.Data?["softwarePath"], pex.Data?["blockPath"], pex.Data?["exportPath"]);
+
+                            throw new McpException(msg, McpErrorCode.InternalError);
+                        }
+
+                    case TiaMcpServer.Siemens.PortalErrorCode.InvalidParams:
+                    case TiaMcpServer.Siemens.PortalErrorCode.InvalidState:
+                        {
+                            throw new McpException(pex.Message, McpErrorCode.InvalidParams);
+                        }
                 }
+
+                // Fallback
+                throw new McpException(pex.Message, McpErrorCode.InternalError);
             }
             catch (Exception ex) when (ex is not McpException)
             {
@@ -822,6 +885,48 @@ namespace TiaMcpServer.ModelContextProtocol
             }
         }
 
+        private static string BuildBlockPathSuggestion(string softwarePath, string blockPath)
+        {
+            if (string.IsNullOrEmpty(blockPath) || blockPath.Contains('/')) return string.Empty;
+            try
+            {
+                var escaped = Regex.Escape(blockPath);
+                var blocks = Portal.GetBlocks(softwarePath, $"^{escaped}$");
+                if (blocks == null || blocks.Count == 0)
+                {
+                    blocks = Portal.GetBlocks(softwarePath, escaped);
+                }
+
+                var candidates = blocks
+                    .Take(10)
+                    .Select(b =>
+                    {
+                        var name = b.Name;
+                        var parts = new List<string> { name };
+                        var parent = b.Parent;
+                        while (parent != null)
+                        {
+                            if (parent is PlcBlockSystemGroup) break;
+                            if (parent is PlcBlockGroup grp)
+                            {
+                                parts.Insert(0, grp.Name);
+                                parent = grp.Parent;
+                            }
+                            else break;
+                        }
+                        if (parts.Count > 1) parts.RemoveAt(0);
+                        return string.Join("/", parts);
+                    })
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                return candidates.Count > 0 ? $" Did you mean: {string.Join(", ", candidates)}?" : string.Empty;
+            }
+            catch
+            {
+                return string.Empty; // best effort only
+            }
+        }
         [McpServerTool(Name = "ImportBlock"), Description("Import a block file to plc software")]
         public static ResponseImportBlock ImportBlock(
             [Description("softwarePath: defines the path in the project structure to the plc software")] string softwarePath,
@@ -915,6 +1020,33 @@ namespace TiaMcpServer.ModelContextProtocol
 
                 // Export blocks asynchronously
                 var exportedBlocks = await Task.Run(() => Portal.ExportBlocks(softwarePath, exportPath, regexName, preservePath));
+
+                // Build list of inconsistent (skipped) blocks for reporting
+                var inconsistentInfos = new List<ResponseBlockInfo>();
+                if (allBlocks != null)
+                {
+                    foreach (var b in allBlocks)
+                    {
+                        if (b != null && b.IsConsistent == false)
+                        {
+                            var attrs = Helper.GetAttributeList(b);
+                            inconsistentInfos.Add(new ResponseBlockInfo
+                            {
+                                Name = b.Name,
+                                TypeName = b.GetType().Name,
+                                Namespace = b.Namespace,
+                                ProgrammingLanguage = Enum.GetName(typeof(ProgrammingLanguage), b.ProgrammingLanguage),
+                                MemoryLayout = Enum.GetName(typeof(MemoryLayout), b.MemoryLayout),
+                                IsConsistent = b.IsConsistent,
+                                HeaderName = b.HeaderName,
+                                ModifiedDate = b.ModifiedDate,
+                                IsKnowHowProtected = b.IsKnowHowProtected,
+                                Attributes = attrs,
+                                Description = b.ToString()
+                            });
+                        }
+                    }
+                }
                 
                 // Send progress update after export completion
                 if (exportedBlocks != null && progressToken != null)
@@ -977,12 +1109,14 @@ namespace TiaMcpServer.ModelContextProtocol
                     {
                         Message = $"Export completed: {processedCount} blocks with regex '{regexName}' exported from '{softwarePath}' to '{exportPath}'",
                         Items = responseList,
+                        Inconsistent = inconsistentInfos,
                         Meta = new JsonObject
                         {
                             ["timestamp"] = DateTime.Now,
                             ["success"] = true,
                             ["totalBlocks"] = totalBlocks,
                             ["exportedBlocks"] = processedCount,
+                            ["inconsistentBlocks"] = inconsistentInfos.Count,
                             ["duration"] = duration
                         }
                     };
@@ -1145,6 +1279,27 @@ namespace TiaMcpServer.ModelContextProtocol
                     throw new McpException($"Failed exporting type from '{typePath}' to '{exportPath}'", McpErrorCode.InternalError);
                 }
             }
+            catch (TiaMcpServer.Siemens.PortalException pex)
+            {
+                switch (pex.Code)
+                {
+                    case TiaMcpServer.Siemens.PortalErrorCode.NotFound:
+                        throw new McpException("Type not found.", McpErrorCode.InvalidParams);
+                    case TiaMcpServer.Siemens.PortalErrorCode.InvalidState:
+                    case TiaMcpServer.Siemens.PortalErrorCode.InvalidParams:
+                        throw new McpException(pex.Message, McpErrorCode.InvalidParams);
+                    case TiaMcpServer.Siemens.PortalErrorCode.ExportFailed:
+                        {
+                            var reason = pex.InnerException?.Message?.Trim();
+                            var msg = "Failed to export type.";
+                            if (!string.IsNullOrEmpty(reason)) msg += $" Reason: {reason}";
+                            Logger?.LogError(pex, "MCP ExportType failed for {SoftwarePath} {TypePath} -> {ExportPath}",
+                                pex.Data?["softwarePath"], pex.Data?["typePath"], pex.Data?["exportPath"]);
+                            throw new McpException(msg, McpErrorCode.InternalError);
+                        }
+                }
+                throw new McpException(pex.Message, McpErrorCode.InternalError);
+            }
             catch (Exception ex) when (ex is not McpException)
             {
                 throw new McpException($"Unexpected error exporting type from '{typePath}' to '{exportPath}': {ex.Message}", ex, McpErrorCode.InternalError);
@@ -1244,6 +1399,30 @@ namespace TiaMcpServer.ModelContextProtocol
 
                 // Export types asynchronously
                 var exportedTypes = await Task.Run(() => Portal.ExportTypes(softwarePath, exportPath, regexName, preservePath));
+
+                // Build list of inconsistent (skipped) types for reporting
+                var inconsistentTypeInfos = new List<ResponseTypeInfo>();
+                if (allTypes != null)
+                {
+                    foreach (var t in allTypes)
+                    {
+                        if (t != null && t.IsConsistent == false)
+                        {
+                            var attrs = Helper.GetAttributeList(t);
+                            inconsistentTypeInfos.Add(new ResponseTypeInfo
+                            {
+                                Name = t.Name,
+                                TypeName = t.GetType().Name,
+                                Namespace = t.Namespace,
+                                IsConsistent = t.IsConsistent,
+                                ModifiedDate = t.ModifiedDate,
+                                IsKnowHowProtected = t.IsKnowHowProtected,
+                                Attributes = attrs,
+                                Description = t.ToString()
+                            });
+                        }
+                    }
+                }
                 
                 // Send progress update after export completion
                 if (exportedTypes != null && progressToken != null)
@@ -1303,12 +1482,14 @@ namespace TiaMcpServer.ModelContextProtocol
                     {
                         Message = $"Export completed: {processedCount} types with regex '{regexName}' exported from '{softwarePath}' to '{exportPath}'",
                         Items = responseList,
+                        Inconsistent = inconsistentTypeInfos,
                         Meta = new JsonObject
                         {
                             ["timestamp"] = DateTime.Now,
                             ["success"] = true,
                             ["totalTypes"] = totalTypes,
                             ["exportedTypes"] = processedCount,
+                            ["inconsistentTypes"] = inconsistentTypeInfos.Count,
                             ["duration"] = duration
                         }
                     };
