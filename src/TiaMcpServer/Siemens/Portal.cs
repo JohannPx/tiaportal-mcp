@@ -2362,9 +2362,6 @@ namespace TiaMcpServer.Siemens
                 }
             }
 
-            // cut off the first name auf first 'Programmbausteine/'
-            path = path[(path.IndexOf('/') + 1)..];
-
             return path;
         }
 
@@ -2402,9 +2399,6 @@ namespace TiaMcpServer.Siemens
                     path = $"{nullableGroup.Name}/{path}";
                 }
             }
-
-            // cut off the first name auf first 'Programmbausteine/'
-            path = path[(path.IndexOf('/') + 1)..];
 
             return path;
         }
