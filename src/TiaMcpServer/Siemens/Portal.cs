@@ -1106,58 +1106,113 @@ namespace TiaMcpServer.Siemens
             }
 
             var exportList = new List<PlcBlock>();
+            var failures = new List<string>();
+            
+            PlcBlock[] list;
 
             try
             {
-                var list = GetBlocks(softwarePath, regexName);
-                
-                if (list.Count > 0)
+                list = GetBlocks(softwarePath, regexName).ToArray();
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Failed to retrieve block list for {SoftwarePath}", softwarePath);
+                return exportList;
+            }
+
+            for (int k = 0; k < list.Count(); k++)
+            {
+                var block = list[k];
+
+                _logger?.LogDebug($"- Exporting block {k}/{list.Count()} : {block.Name}");
+
+                string path;
+                if (preservePath)
                 {
-                    // Export each block to the specified path
-                    foreach (var block in list)
+                    var groupPath = "";
+                    if (block.Parent is PlcBlockGroup parentGroup)
                     {
-                        var path = string.Empty;
+                        groupPath = GetPlcBlockGroupPath(parentGroup);
+                    }
+                    path = Path.Combine(exportPath, groupPath.Replace('/', '\\'), $"{block.Name}.xml");
+                }
+                else
+                {
+                    path = Path.Combine(exportPath, $"{block.Name}.xml");
+                }
 
-                        if (preservePath)
-                        {
-                            var groupPath = "";
-                            if (block.Parent is PlcBlockGroup parentGroup)
-                            {
-                                groupPath = GetPlcBlockGroupPath(parentGroup);
-                            }
+                try
+                {
+                    if (!block.IsConsistent)
+                    {
+                        _logger?.LogWarning("Skipping inconsistent block {Name}", block.Name);
 
-                            path = Path.Combine(exportPath, groupPath.Replace('/', '\\'), $"{block.Name}.xml");
-                        }
-                        else
-                        {
-                            path = Path.Combine(exportPath, $"{block.Name}.xml");
-                        }
-                        try
-                        {
-                            if (File.Exists(path))
-                            {
-                                File.Delete(path);
-                            }
+                        continue;
+                    }
 
-                            if (block.IsConsistent) 
-                            {
-                                block.Export(new FileInfo(path), ExportOptions.None);
+                    var dir = Path.GetDirectoryName(path);
+                    if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                    {
+                        Directory.CreateDirectory(dir);
+                    }
 
-                                exportList.Add(block);
-                            }
-                        }
-                        catch (Exception ex)
+                    if (File.Exists(path))
+                    {
+                        try { File.Delete(path); }
+                        catch (Exception ioEx)
                         {
-                            // Console.WriteLine($"Error exporting block '{block.Name}': {ex.Message}");
-                            // continue;
-                            throw new Exception($"Exception at block '{block.Name}'. {ex.Message}");
+                            failures.Add($"{block.Name}: cannot delete existing file ({ioEx.Message})");
+                            _logger?.LogError(ioEx, "Delete failed for {File}", path);
+
+                            continue;
                         }
                     }
+
+                    try
+                    {
+                        block.Export(new FileInfo(path), ExportOptions.None);
+                    }
+                    catch (LicenseNotFoundException licEx)
+                    {
+                        failures.Add($"{block.Name}: license not found ({licEx.Message})");
+                        _logger?.LogError(licEx, "License issue exporting {Block}", block.Name);
+
+                        continue;
+                    }
+                    catch (EngineeringTargetInvocationException engEx)
+                    {
+                        failures.Add($"{block.Name}: target invocation failed ({engEx.Message})");
+                        _logger?.LogError(engEx, "TargetInvocationException exporting {Block}", block.Name);
+
+                        continue;
+                    }
+                    catch (Exception ex)
+                    {
+                        failures.Add($"{block.Name}: export failed ({ex.Message})");
+                        _logger?.LogError(ex, "Export failed for {Block}", block.Name);
+
+                        continue;
+                    }
+
+                    exportList.Add(block);
+                }
+                catch (Exception ex)
+                {
+                    // Catch only truly unexpected wrapper-level errors
+                    failures.Add($"{block.Name}: unexpected exception ({ex.Message})");
+                    _logger?.LogError(ex, "Unexpected error at block {Block}", block.Name);
+                    // continue with next block
                 }
             }
-            catch (Exception)
+
+            if (failures.Count > 0)
             {
-                // Console.WriteLine($"Error exporting blocks: {ex.Message}");
+                _logger?.LogWarning($"ExportBlocks completed with {failures.Count} failures out of {list.Count()}. First failure: {failures[0]}");
+                // Optionally: _logger?.LogDebug("All failures: {Failures}", string.Join("; ", failures));
+            }
+            else
+            {
+                _logger?.LogInformation($"ExportBlocks completed successfully. Exported {exportList.Count} blocks.");
             }
 
             return exportList;
@@ -1173,61 +1228,96 @@ namespace TiaMcpServer.Siemens
             }
 
             var exportList = new List<PlcType>();
+            var failures = new List<string>();
+
+            PlcType[] list;
 
             try
             {
-                var list = GetTypes(softwarePath, regexName);
+                list = GetTypes(softwarePath, regexName).ToArray();
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Failed to retrieve type list for {SoftwarePath}", softwarePath);
+                return exportList;
+            }
 
-                if (list.Count > 0)
+            for (int i = 0; i < list.Count(); i++)
+            {
+                var type = list[i];
+
+                _logger?.LogDebug("- Exporting type {Index}/{Total} : {Name}", i, list.Count(), type.Name);
+
+                string path;
+                if (preservePath)
                 {
-                    // Export each type to the specified path
-                    foreach (var type in list)
+                    var groupPath = "";
+                    if (type.Parent is PlcTypeGroup parentGroup)
                     {
-                        var path = string.Empty;
-                        if (preservePath)
-                        {
-                            var groupPath = "";
-                            if (type.Parent is PlcTypeGroup parentGroup)
-                            {
-                                groupPath = GetPlcTypeGroupPath(parentGroup);
-                            }
-                            path = Path.Combine(exportPath, groupPath.Replace('/', '\\'), $"{type.Name}.xml");
-                        }
-                        else
-                        {
-                            path = Path.Combine(exportPath, $"{type.Name}.xml");
-                        }
-                        try
-                        {
-
-                            if (File.Exists(path))
-                            {
-                                File.Delete(path);
-                            }
-
-                            if(type.IsConsistent)
-                            {
-                                type.Export(new FileInfo(path), ExportOptions.None);
-
-                                exportList.Add(type);
-                            }
-
-                        }
-                        catch (Exception ex)
-                        {
-                            // Console.WriteLine($"Error exporting user defined type '{type.Name}': {ex.Message}");
-                            // continue;
-                            throw new Exception($"Exception at type '{type.Name}'. {ex.Message}");
-                        }
+                        groupPath = GetPlcTypeGroupPath(parentGroup);
                     }
+                    path = Path.Combine(exportPath, groupPath.Replace('/', '\\'), $"{type.Name}.xml");
+                }
+                else
+                {
+                    path = Path.Combine(exportPath, $"{type.Name}.xml");
                 }
 
+                try
+                {
+                    if (!type.IsConsistent)
+                    {
+                        _logger?.LogWarning("Skipping inconsistent type {Name}", type.Name);
+                        continue;
+                    }
 
+                    var dir = Path.GetDirectoryName(path);
+                    if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                    {
+                        Directory.CreateDirectory(dir);
+                    }
 
+                    if (File.Exists(path))
+                    {
+                        try
+                        {
+                            File.Delete(path);
+                        }
+                        catch (Exception ioEx)
+                        {
+                            failures.Add($"{type.Name}: cannot delete existing file ({ioEx.Message})");
+                            _logger?.LogError(ioEx, "Delete failed for {File}", path);
+                            continue;
+                        }
+                    }
+
+                    try
+                    {
+                        type.Export(new FileInfo(path), ExportOptions.None);
+                    }
+                    catch (Exception ex)
+                    {
+                        failures.Add($"{type.Name}: export failed ({ex.Message})");
+                        _logger?.LogError(ex, "Export failed for type {Type}", type.Name);
+                        continue;
+                    }
+
+                    exportList.Add(type);
+                }
+                catch (Exception ex)
+                {
+                    failures.Add($"{type.Name}: unexpected exception ({ex.Message})");
+                    _logger?.LogError(ex, "Unexpected error at type {Type}", type.Name);
+                }
             }
-            catch (Exception)
+
+            if (failures.Count > 0)
             {
-                // Console.WriteLine($"Error exporting user defined types: {ex.Message}");
+                _logger?.LogWarning($"ExportTypes completed with {failures.Count} failures out of {list.Count()}. First failure: {failures[0]}");
+            }
+            else
+            {
+                _logger?.LogInformation($"ExportTypes completed successfully. Exported {exportList.Count} types.");
             }
 
             return exportList;
@@ -1349,43 +1439,136 @@ namespace TiaMcpServer.Siemens
                 return null;
             }
 
-            var list = GetBlocks(softwarePath, regexName);
-
             var exportList = new List<PlcBlock>();
+            var failures = new List<string>();
 
-            if (list != null)
+            PlcBlock[] list;
+            try
             {
-                foreach (var block in list)
+                list = GetBlocks(softwarePath, regexName).ToArray();
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, $"Failed to retrieve block list for {softwarePath}");
+                return exportList;
+            }
+
+            for (int i = 0; i < list.Count(); i++)
+            {
+                var block = list[i];
+
+                _logger?.LogDebug($"- Exporting block as document {i}/{list.Count()} : {block.Name}");
+
+                // Skip inconsistent blocks (TIA generally won’t export them)
+                if (!block.IsConsistent)
+                {
+                    _logger?.LogWarning($"Skipping inconsistent block {block.Name}");
+                    continue;
+                }
+
+                // Determine base directory (preserve group path if requested)
+                string targetDir = exportPath;
+                if (preservePath && block.Parent is PlcBlockGroup parentGroup)
+                {
+                    var groupPath = GetPlcBlockGroupPath(parentGroup);
+                    if (!string.IsNullOrWhiteSpace(groupPath))
+                    {
+                        targetDir = Path.Combine(exportPath, groupPath.Replace('/', '\\'));
+                    }
+                }
+
+                try
+                {
+                    if (!Directory.Exists(targetDir))
+                    {
+                        Directory.CreateDirectory(targetDir);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    failures.Add($"{block.Name}: cannot create directory '{targetDir}' ({ex.Message})");
+                    _logger?.LogError(ex, $"Directory creation failed for {targetDir}");
+                    continue;
+                }
+
+                var fileDcl = Path.Combine(targetDir, $"{block.Name}.s7dcl");
+                var fileRes = Path.Combine(targetDir, $"{block.Name}.s7res");
+
+                // Clean previous artifacts
+                foreach (var f in new[] { fileDcl, fileRes })
                 {
                     try
                     {
-                        var blockFiles7dclPath = Path.Combine(exportPath, $"{block.Name}.s7dcl");
-                        if (File.Exists(blockFiles7dclPath))
+                        if (File.Exists(f))
                         {
-                            File.Delete(blockFiles7dclPath);
-                        }
-                        var blockFiles7resPath = Path.Combine(exportPath, $"{block.Name}.s7res");
-                        if (File.Exists(blockFiles7resPath))
-                        {
-                            File.Delete(blockFiles7resPath);
-                        }
-
-                        var result = block.ExportAsDocuments(new DirectoryInfo(exportPath), block.Name);
-
-                        if (result != null && result.State == DocumentResultState.Success)
-                        {
-                            exportList.Add(block);
+                            File.Delete(f);
                         }
                     }
-                    catch (EngineeringNotSupportedException)
+                    catch (Exception ex)
                     {
-                        // todo: throw or skip?
-                    }
-                    catch (Exception)
-                    {
-                        // todo: throw or skip?
+                        failures.Add($"{block.Name}: cannot delete existing '{Path.GetFileName(f)}' ({ex.Message})");
+                        _logger?.LogError(ex, $"Failed deleting existing file {f}");
+                        // Continue anyway; export might overwrite.
                     }
                 }
+
+                try
+                {
+                    DocumentExportResult? result = null;
+                    try
+                    {
+                        result = block.ExportAsDocuments(new DirectoryInfo(targetDir), block.Name);
+                    }
+                    catch (EngineeringNotSupportedException ex)
+                    {
+                        failures.Add($"{block.Name}: not supported ({ex.Message})");
+                        _logger?.LogWarning(ex, $"EngineeringNotSupported exporting {block.Name}");
+                        continue;
+                    }
+                    catch (LicenseNotFoundException ex)
+                    {
+                        failures.Add($"{block.Name}: license not found ({ex.Message})");
+                        _logger?.LogError(ex, $"License issue exporting {block.Name}");
+                        continue;
+                    }
+                    catch (Exception ex)
+                    {
+                        failures.Add($"{block.Name}: export threw ({ex.Message})");
+                        _logger?.LogError(ex, $"ExportAsDocuments failed for {block.Name}");
+                        continue;
+                    }
+
+                    if (result == null)
+                    {
+                        failures.Add($"{block.Name}: no result returned");
+                        continue;
+                    }
+
+                    if (result.State == DocumentResultState.Success)
+                    {
+                        exportList.Add(block);
+                    }
+                    else
+                    {
+                        failures.Add($"{block.Name}: result state {result.State}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    failures.Add($"{block.Name}: unexpected exception ({ex.Message})");
+                    _logger?.LogError(ex, $"Unexpected wrapper error for {block.Name}");
+                }
+            }
+
+            if (failures.Count > 0)
+            {
+                _logger?.LogWarning($"ExportBlocksAsDocuments completed with {failures.Count} failures out of {list.Count()}. First failure: {failures[0]}");
+                // Optional verbose list:
+                // _logger?.LogDebug("All failures: {Failures}", string.Join("; ", failures));
+            }
+            else
+            {
+                _logger?.LogInformation($"ExportBlocksAsDocuments completed successfully. Exported {exportList.Count} blocks.");
             }
 
             return exportList;
