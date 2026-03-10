@@ -1,5 +1,25 @@
 # Change Log
 
+## [0.0.19] - 2026-03-10
+
+### New Tools (25)
+- **PLC Tags**: `GetPlcTagTables`, `GetPlcTags`, `ExportPlcTagTable`, `ImportPlcTagTable`
+- **HMI Screens**: `GetHmiScreens`, `ExportHmiScreen`, `ImportHmiScreen`
+- **Libraries**: `GetLibraries`, `GetLibraryMasterCopies`, `CopyFromLibrary`
+- **Networking (read)**: `GetNetworkInterfaces`, `GetSubnets`
+- **Networking (write)**: `CreateSubnet`, `ConnectToSubnet`, `SetNetworkAttribute`
+- **Device Management**: `AddDevice`, `RemoveDevice`, `SearchHardwareCatalog`
+- **Online/Download**: `DownloadToDevice`, `GoOnline`, `GoOffline`
+- **Safety**: `GetSafetyInfo`, `CompileSafety`
+- **Compilation**: `CompileHardware`
+- **Software**: `GetBlocksWithHierarchy`
+- **Project**: `CreateProject`
+
+### Infrastructure
+- New: GitHub Actions CI/Release workflow (build on push, release on tag)
+- Docs: Updated README with full tool catalog (49 tools)
+- Bump: AssemblyVersion 0.0.18 -> 0.0.19
+
 ## [0.0.16] - 2025-09-02
 
 - New: ImportFromDocuments and ImportBlocksFromDocuments (V20+)
@@ -72,5 +92,5 @@
 
 ## [0.0.3] - 2025-06-23
 
-- Release on Visual Studio Code Narketplace
+- Release on Visual Studio Code Marketplace
 

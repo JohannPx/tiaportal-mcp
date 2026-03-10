@@ -2,11 +2,139 @@
 
 A MCP server which connects to Siemens TIA Portal.
 
+## Installation
+
+Download the latest release from [GitHub Releases](../../releases). Extract the zip and point your MCP client to `TiaMcpServer.exe`.
+
+Or build from source:
+
+```bash
+dotnet build -c Release
+# Output: src/TiaMcpServer/bin/Release/net48/TiaMcpServer.exe
+```
+
 ## Features
 
 - Connect to a TIA Portal instance
 - Browse and interact with TIA Portal projects
 - Perform basic project operations from within VS Code
+
+## Available Tools (49)
+
+### Connection & State
+
+| Tool | Description |
+|------|-------------|
+| `Connect` | Connect to TIA Portal |
+| `Disconnect` | Disconnect from TIA Portal |
+| `GetState` | Get server state (connection + project) |
+
+### Project Management
+
+| Tool | Description |
+|------|-------------|
+| `GetProject` | Get open project/session info |
+| `OpenProject` | Open a project/session |
+| `CreateProject` | Create a new project |
+| `SaveProject` | Save the current project |
+| `SaveAsProject` | Save project with a new name |
+| `CloseProject` | Close the current project |
+| `GetProjectTree` | Get project structure as tree view |
+
+### Devices
+
+| Tool | Description |
+|------|-------------|
+| `GetDevices` | List all devices |
+| `GetDeviceInfo` | Get device details |
+| `GetDeviceItemInfo` | Get device item details |
+| `AddDevice` | Add a device from hardware catalog |
+| `RemoveDevice` | Remove a device |
+| `SearchHardwareCatalog` | Search hardware catalog |
+
+### PLC Software
+
+| Tool | Description |
+|------|-------------|
+| `GetSoftwareInfo` | Get PLC software info |
+| `GetSoftwareTree` | Get software structure/tree |
+| `CompileSoftware` | Compile PLC software |
+| `CompileHardware` | Compile hardware configuration |
+
+### Blocks (OB, FB, FC, DB)
+
+| Tool | Description |
+|------|-------------|
+| `GetBlocks` | List blocks |
+| `GetBlockInfo` | Get block details |
+| `GetBlocksWithHierarchy` | List blocks with group hierarchy |
+| `ExportBlock` | Export a single block |
+| `ExportBlocks` | Export multiple blocks |
+| `ImportBlock` | Import a block |
+| `ExportBlocksAsDocuments` | Export blocks as .s7dcl/.s7res (V20+) |
+| `ImportBlocksFromDocuments` | Import blocks from .s7dcl/.s7res (V20+) |
+| `ExportAsDocuments` | Export single block as document (V20+) |
+| `ImportFromDocuments` | Import single block from document (V20+) |
+
+### Types (UDT)
+
+| Tool | Description |
+|------|-------------|
+| `GetTypes` | List types |
+| `GetTypeInfo` | Get type details |
+| `ExportType` | Export a type |
+| `ExportTypes` | Export multiple types |
+| `ImportType` | Import a type |
+
+### PLC Tags
+
+| Tool | Description |
+|------|-------------|
+| `GetPlcTagTables` | List PLC tag tables |
+| `GetPlcTags` | List tags from a tag table |
+| `ExportPlcTagTable` | Export a tag table |
+| `ImportPlcTagTable` | Import a tag table |
+
+### HMI Screens
+
+| Tool | Description |
+|------|-------------|
+| `GetHmiScreens` | List HMI screens |
+| `ExportHmiScreen` | Export an HMI screen |
+| `ImportHmiScreen` | Import an HMI screen |
+
+### Libraries
+
+| Tool | Description |
+|------|-------------|
+| `GetLibraries` | List available libraries |
+| `GetLibraryMasterCopies` | List master copies |
+| `CopyFromLibrary` | Copy master copy into PLC |
+
+### Networking
+
+| Tool | Description |
+|------|-------------|
+| `GetNetworkInterfaces` | Get device network interfaces |
+| `GetSubnets` | List project subnets |
+| `CreateSubnet` | Create a subnet |
+| `ConnectToSubnet` | Connect device to subnet |
+| `SetNetworkAttribute` | Set network attribute (e.g., IP) |
+
+### Online & Download
+
+| Tool | Description |
+|------|-------------|
+| `DownloadToDevice` | Download software to PLC |
+| `GoOnline` | Go online with device |
+| `GoOffline` | Go offline |
+
+### Safety (F-CPU)
+
+| Tool | Description |
+|------|-------------|
+| `GetSafetyInfo` | Get safety information |
+| `CompileSafety` | Compile safety program |
 
 ## Requirements
 
