@@ -1,23 +1,73 @@
 # TIA-Portal MCP-Server
 
-A MCP server which connects to Siemens TIA Portal.
+An MCP server that connects LLMs to Siemens TIA Portal via the Openness API. Browse projects, export/import blocks, manage devices, download to PLCs, and more — all from your AI assistant.
 
-## Installation
+## Quick Start
 
-Download the latest release from [GitHub Releases](../../releases). Extract the zip and point your MCP client to `TiaMcpServer.exe`.
+### 1. Prerequisites
 
-Or build from source:
+- Windows with **.NET Framework 4.8**
+- **Siemens TIA Portal V20** installed and running
+- Environment variable `TiaPortalLocation` set to `C:\Program Files\Siemens\Automation\Portal V20`
+- User in Windows group **Siemens TIA Openness**
+
+### 2. Download
+
+Download `TiaMcpServer-<version>.zip` from [GitHub Releases](../../releases) and extract it.
+
+### 3. Configure your MCP client
+
+**Claude Code** — add to `.mcp.json` in your workspace:
+```json
+{
+  "servers": {
+    "tia-portal": {
+      "command": "C:\\path\\to\\TiaMcpServer.exe",
+      "args": [],
+      "env": {}
+    }
+  }
+}
+```
+
+**Claude Desktop** — add to `%APPDATA%\Claude\claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "tia-portal": {
+      "command": "C:\\path\\to\\TiaMcpServer.exe",
+      "args": [],
+      "env": {}
+    }
+  }
+}
+```
+
+**VS Code Copilot Chat** — add to `.vscode/mcp.json`:
+```json
+{
+  "servers": {
+    "tia-portal": {
+      "command": "C:\\path\\to\\TiaMcpServer.exe",
+      "args": [],
+      "env": {}
+    }
+  }
+}
+```
+
+> For TIA Portal V18 or V19, add `"--tia-major-version", "18"` to `args`.
+
+### 4. Use it
+
+Open TIA Portal, then ask your AI assistant to connect and interact with your project.
+
+## Build from source
 
 ```bash
 dotnet build -c Release
 # Output: src/TiaMcpServer/bin/Release/net48/TiaMcpServer.exe
 ```
-
-## Features
-
-- Connect to a TIA Portal instance
-- Browse and interact with TIA Portal projects
-- Perform basic project operations from within VS Code
 
 ## Available Tools (49)
 
@@ -136,19 +186,11 @@ dotnet build -c Release
 | `GetSafetyInfo` | Get safety information |
 | `CompileSafety` | Compile safety program |
 
-## Requirements
+## TIA Portal Versions
 
-- __.net Framework 4.8__ installed
-- __Siemens TIA Portal V20__ installed and running on your machine
-- Check if under `Environment Variables/User variable for user <name>` the variable `TiaPortalLocation` is set to `C:\Program Files\Siemens\Automation\Portal V20`
-- User must be in Windows User Group `Siemens TIA Openness`
-
-## TIA-Portal Versions
-
-- __V20__ is the default version.
-- Previous versions are also supported, but must use the `--tia-major-version` argument to specify the version.
-- Export as documents (.s7dcl/.s7res) via `ExportAsDocuments`/`ExportBlocksAsDocuments` requires TIA Portal V20 or newer.
-- Import from documents (.s7dcl/.s7res) via `ImportFromDocuments`/`ImportBlocksFromDocuments` also requires TIA Portal V20 or newer.
+- **V20** is the default version.
+- Previous versions (V18, V19) are supported via the `--tia-major-version` argument.
+- Export/import as documents (.s7dcl/.s7res) requires TIA Portal V20 or newer.
 
 ## Known Limitations
 
@@ -185,36 +227,6 @@ dotnet build -c Release
   - The current ModelContextProtocol .NET package in use (0.3.0-preview.4) does not provide an HTTP server transport out of the box.
   - Plan (see TODO): add `--transport http`, `--http-prefix`, and `--http-api-key`, host with `HttpListener`, and route POST `/mcp` to the MCP handlers. Later align with MCP Streamable HTTP spec.
 
-## Copilot Chat
+## VS Code Extension
 
-- Example mcp.json, when using VS Code extension [TIA-Portal MCP-Server](https://marketplace.visualstudio.com/items?itemName=JHeilingbrunner.vscode-tiaportal-mcp) and TIA-Portal V18
-  ```json
-  {
-      "servers": {
-          "vscode-tiaportal-mcp": {
-          "command": "c:\\Users\\<user>\\.vscode\\extensions\\jheilingbrunner.vscode-tiaportal-mcp-<version>\\srv\\net48\\TiaMcpServer.exe",
-          "args": [
-              "--tia-major-version",
-              "18"
-          ],
-          "env": {}
-          }
-      }
-  }
-  ```
-
-## Claude Desktop
-
-- Create/Edit to add/remove server to `C:\Users\<user>\AppData\Roaming\Claude\claude_desktop_config.json`:
-
-  ```json
-  {
-    "mcpServers": {
-      "vscode-tiaportal-mcp": {
-        "command": "<path-to>\\TiaMcpServer.exe",
-        "args": [],
-        "env": {}
-      }
-    }
-  }
-  ```
+This MCP server is also available as a VS Code extension: [TIA-Portal MCP-Server](https://marketplace.visualstudio.com/items?itemName=JHeilingbrunner.vscode-tiaportal-mcp). The extension bundles the server and configures it automatically.
