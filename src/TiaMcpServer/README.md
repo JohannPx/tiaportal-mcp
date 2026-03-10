@@ -32,20 +32,24 @@ The MCP server is responsible for receiving requests from the LLM, executing the
 
 The TIA Portal interfacing API is implemented in the `Siemens` directory. This API provides a set of classes and methods for performing common tasks, such as connecting to the TIA Portal, opening and closing projects, and working with devices, blocks, and types.
 
-## 4. Functionality
+## 4. Functionality (49 MCP Tools)
 
 The TiaMcpServer project provides the following functionality:
 
-*   **Connecting and disconnecting from the TIA Portal:** The `Connect` and `Disconnect` tools allow the LLM to connect to and disconnect from the TIA Portal.
-*   **Getting the state of the TIA Portal:** The `GetState` tool allows the LLM to get the current state of the TIA Portal, such as whether it is connected to a project and the name of the project.
-*   **Working with projects and sessions:** The `GetOpenProjects`, `OpenProject`, `SaveProject`, `SaveAsProject`, and `CloseProject` tools allow the LLM to work with TIA Portal projects and sessions.
-*   **Working with devices:** The `GetStructure`, `GetDeviceInfo`, `GetDeviceItemInfo`, and `GetDevices` tools allow the LLM to get information about the devices in a project.
-*   **Working with PLC software:** The `GetSoftwareInfo` and `CompileSoftware` tools allow the LLM to get information about and compile PLC software.
-*   **Working with blocks:** The `GetBlockInfo`, `GetBlocks`, `GetBlocksWithHierarchy`, `ExportBlock`, `ImportBlock`, and `ExportBlocks` tools allow the LLM to work with blocks.
-    - `ExportBlock` expects `blockPath` to be a fully qualified path like `Group/Subgroup/Name`. Passing just a name is ambiguous; the MCP layer will return `InvalidParams` and may suggest likely full paths based on project contents.
-*   **Working with types:** The `GetTypeInfo`, `GetTypes`, `ExportType`, `ImportType`, and `ExportTypes` tools allow the LLM to work with types.
-*   **Exporting blocks as documents (V20+):** The `ExportAsDocuments` and `ExportBlocksAsDocuments` tools export blocks as SIMATIC SD documents (.s7dcl/.s7res). Requires TIA Portal V20 or newer.
-*   **Importing blocks from documents (V20+):** The `ImportFromDocuments` and `ImportBlocksFromDocuments` tools import blocks from SIMATIC SD documents into PLC software. Requires TIA Portal V20 or newer.
+*   **Connection & State (3):** `Connect`, `Disconnect`, `GetState`
+*   **Project Management (7):** `GetProject`, `OpenProject`, `CreateProject`, `SaveProject`, `SaveAsProject`, `CloseProject`, `GetProjectTree`
+*   **Devices (6):** `GetDevices`, `GetDeviceInfo`, `GetDeviceItemInfo`, `AddDevice`, `RemoveDevice`, `SearchHardwareCatalog`
+*   **PLC Software (4):** `GetSoftwareInfo`, `GetSoftwareTree`, `CompileSoftware`, `CompileHardware`
+*   **Blocks (10):** `GetBlocks`, `GetBlockInfo`, `GetBlocksWithHierarchy`, `ExportBlock`, `ExportBlocks`, `ImportBlock`, `ExportBlocksAsDocuments`, `ImportBlocksFromDocuments`, `ExportAsDocuments`, `ImportFromDocuments`
+    - `ExportBlock` expects `blockPath` to be a fully qualified path like `Group/Subgroup/Name`.
+    - Export/Import as documents (.s7dcl/.s7res) requires TIA Portal V20+.
+*   **Types (5):** `GetTypes`, `GetTypeInfo`, `ExportType`, `ExportTypes`, `ImportType`
+*   **PLC Tags (4):** `GetPlcTagTables`, `GetPlcTags`, `ExportPlcTagTable`, `ImportPlcTagTable`
+*   **HMI Screens (3):** `GetHmiScreens`, `ExportHmiScreen`, `ImportHmiScreen`
+*   **Libraries (3):** `GetLibraries`, `GetLibraryMasterCopies`, `CopyFromLibrary`
+*   **Networking (5):** `GetNetworkInterfaces`, `GetSubnets`, `CreateSubnet`, `ConnectToSubnet`, `SetNetworkAttribute`
+*   **Online & Download (3):** `DownloadToDevice`, `GoOnline`, `GoOffline`
+*   **Safety (2):** `GetSafetyInfo`, `CompileSafety`
 
 ## 5. Conclusion
 

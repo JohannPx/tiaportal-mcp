@@ -1,5 +1,9 @@
 # Gemini Project Analysis: TiaMcpServer
 
+> **DEPRECATED**: This file was generated for Gemini AI and is no longer maintained.
+> For up-to-date project guidelines, see [`CLAUDE.md`](CLAUDE.md).
+> For the full tool catalog, see [`README.md`](README.md).
+
 This document provides a comprehensive overview of the TiaMcpServer project, a C# application that acts as a Model Context Protocol (MCP) server to expose the Siemens TIA Portal API to Large Language Models (LLMs).
 
 ## 1. Project Overview

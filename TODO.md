@@ -4,11 +4,11 @@ Centralized list of actionable improvements gathered from initial repo review. U
 
 ## Documentation
 - [ ] Add a "CLI Options" section to `README.md` documenting `--tia-major-version <int>` and `--logging <1|2|3>` with defaults and effect (1=stderr, 2=Debug, 3=Event Log). Cross-link to samples.
-- [ ] Add a "Build and Run" section to `README.md` showing `dotnet build`, `dotnet run --project src/TiaMcpServer/TiaMcpServer.csproj`, and running compiled `TiaMcpServer.exe`.
-- [ ] Add a "Testing" section to `README.md` summarizing prerequisites (TIA Portal V20, `.NET Framework 4.8`, env var `TiaPortalLocation`, Windows group membership "Siemens TIA Openness"), how to run `dotnet test`, and expected limitations if environment is not present. Link to `tests/TiaMcpServer.Test/README.md` and mention manual multi-user session creation.
+- [x] Add a "Build and Run" section to `README.md` — done as "Installation" section (v0.0.19).
+- [x] Add a "Testing" section to `README.md` — already present.
 - [ ] Cross-link the `samples/` directory from `README.md`; reference `samples/vscode/mcp.json` and `samples/claude/claude_desktop_config.json`.
-- [ ] Reduce duplication between `gemini.md` and `src/TiaMcpServer/README.md`: consolidate content or keep one as an overview and link to the other.
-- [ ] Expand Known Limitations: Document that as of 2025-09-02, importing Ladder (LAD) blocks from SIMATIC SD documents requires the `.s7res` to contain en-US tags for all items; otherwise import may fail.
+- [x] Reduce duplication between `gemini.md` and `src/TiaMcpServer/README.md` — `gemini.md` marked as deprecated, `CLAUDE.md` is now the source of truth.
+- [x] Expand Known Limitations — already documented in README.
 
 ## CLI / Logging
 - [ ] Update `src/TiaMcpServer/CliOptions.cs` `Logging` comment to match current numeric modes (1=stderr, 2=Debug, 3=Event Log) or switch to string values (e.g., "stdio", "debug", "eventlog"). Align parsing and docs accordingly.
@@ -20,7 +20,7 @@ Centralized list of actionable improvements gathered from initial repo review. U
 - [ ] Ensure requirements are consistently listed across docs: `.NET Framework 4.8`, `TIA Portal V20`, env var `TiaPortalLocation`, and Windows group membership.
 
 ## Changelog
-- [ ] Fix typo in `CHANGELOG.md`: "Narketplace" → "Marketplace".
+- [x] Fix typo in `CHANGELOG.md`: "Narketplace" → "Marketplace" — done (v0.0.19).
 
 ## Tests
 - [ ] In `tests/TiaMcpServer.Test/README.md`, double-check instructions for creating `TestSession1.als20` and referencing paths in `Settings.cs`; link this from the main `README.md` Testing section.
@@ -210,3 +210,16 @@ Centralized list of actionable improvements gathered from initial repo review. U
 - [ ] Validate enum mapping for `importOption` (Override/None; extend if environment exposes more values).
 - [ ] Verify placement into `groupPath` (root vs. nested groups) and behavior when group does not exist.
 - [ ] Add docs pages under `docs/tools/` for import-from-documents tools; include file discovery rules (.s7dcl/.s7res), name derivation, and option mapping.
+
+## New Tools v0.0.19 (25 tools added)
+- [ ] Test all 25 new tools with a real TIA Portal project (PLC tags, HMI, libraries, network, download, safety, hardware)
+- [ ] Add unit tests for new tools (GetPlcTagTables, GetPlcTags, GetHmiScreens, GetLibraries, etc.)
+- [ ] Improve SearchHardwareCatalog to browse the actual hardware catalog recursively (currently limited to project devices + HwUtilities)
+- [ ] Add proper IConfiguration resolution for DownloadToDevice (currently uses DirectoryInfo overload)
+- [ ] Document new tool parameters and usage examples in `docs/tools/`
+
+## CI/CD (v0.0.19)
+- [x] GitHub Actions workflow for CI (build on push) and Release (build + zip on tag)
+- [x] README updated with full tool catalog (49 tools)
+- [x] CHANGELOG updated for v0.0.19
+- [x] CLAUDE.md created for Claude Code agent guidelines
