@@ -3,8 +3,12 @@ using Microsoft.Extensions.Logging;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
+using Siemens.Engineering;
+using Siemens.Engineering.Hmi;
+using Siemens.Engineering.HmiUnified;
 using Siemens.Engineering.SW;
 using Siemens.Engineering.SW.Blocks;
+using Siemens.Engineering.SW.Tags;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -247,6 +251,48 @@ namespace TiaMcpServer.ModelContextProtocol
             catch (Exception ex) when (ex is not McpException)
             {
                 throw new McpException($"Unexpected error opening project '{path}': {ex.Message}", ex, McpErrorCode.InternalError);
+            }
+        }
+
+        [McpServerTool(Name = "CreateProject"), Description("Create a new TIA-Portal project")]
+        public static ResponseCreateProject CreateProject(
+            [Description("projectPath: defines the directory path where to create the project")] string projectPath,
+            [Description("projectName: defines the name of the new project")] string projectName)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(projectPath))
+                {
+                    throw new McpException("projectPath must not be empty", McpErrorCode.InvalidParams);
+                }
+
+                if (string.IsNullOrWhiteSpace(projectName))
+                {
+                    throw new McpException("projectName must not be empty", McpErrorCode.InvalidParams);
+                }
+
+                var success = Portal.CreateProject(projectPath, projectName);
+
+                if (success)
+                {
+                    return new ResponseCreateProject
+                    {
+                        Message = $"Project '{projectName}' created at '{projectPath}'",
+                        Meta = new JsonObject
+                        {
+                            ["timestamp"] = DateTime.Now,
+                            ["success"] = true
+                        }
+                    };
+                }
+                else
+                {
+                    throw new McpException($"Failed to create project '{projectName}' at '{projectPath}'", McpErrorCode.InternalError);
+                }
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Unexpected error creating project '{projectName}' at '{projectPath}': {ex.Message}", ex, McpErrorCode.InternalError);
             }
         }
 
@@ -613,6 +659,40 @@ namespace TiaMcpServer.ModelContextProtocol
             catch (Exception ex) when (ex is not McpException)
             {
                 throw new McpException($"Unexpected error compiling software '{softwarePath}': {ex.Message}", ex, McpErrorCode.InternalError);
+            }
+        }
+
+        [McpServerTool(Name = "CompileHardware"), Description("Compile the hardware configuration for a device")]
+        public static ResponseCompileHardware CompileHardware(
+            [Description("devicePath: defines the path in the project structure to the device (e.g. 'PLC_1')")] string devicePath)
+        {
+            try
+            {
+                var result = Portal.CompileHardware(devicePath);
+                if (result != null && !result.State.ToString().Equals("Error"))
+                {
+                    return new ResponseCompileHardware
+                    {
+                        Message = $"Hardware '{devicePath}' compiled with {result}",
+                        Meta = new JsonObject
+                        {
+                            ["timestamp"] = DateTime.Now,
+                            ["success"] = true
+                        }
+                    };
+                }
+                else
+                {
+                    throw new McpException($"Failed compiling hardware '{devicePath}': {result}", McpErrorCode.InternalError);
+                }
+            }
+            catch (TiaMcpServer.Siemens.PortalException pex)
+            {
+                throw new McpException(pex.Message, McpErrorCode.InvalidParams);
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Unexpected error compiling hardware '{devicePath}': {ex.Message}", ex, McpErrorCode.InternalError);
             }
         }
 
@@ -1999,6 +2079,429 @@ namespace TiaMcpServer.ModelContextProtocol
                 }
             }
             return missing;
+        }
+
+        #endregion
+
+        #region PLC Tag Tables
+
+        [McpServerTool(Name = "GetPlcTagTables"), Description("Get a list of PLC tag tables from plc software")]
+        public static ResponsePlcTagTables GetPlcTagTables(
+            [Description("softwarePath: defines the path in the project structure to the plc software")] string softwarePath,
+            [Description("regexName: defines the name or regular expression to find the tag table. Use empty string (default) to find all")] string regexName = "")
+        {
+            try
+            {
+                var list = Portal.GetPlcTagTables(softwarePath, regexName);
+
+                var responseList = new List<ResponsePlcTagTableInfo>();
+                foreach (var table in list)
+                {
+                    if (table != null)
+                    {
+                        var attributes = Helper.GetAttributeList(table);
+
+                        responseList.Add(new ResponsePlcTagTableInfo
+                        {
+                            Name = table.Name,
+                            Attributes = attributes,
+                            Description = table.ToString()
+                        });
+                    }
+                }
+
+                return new ResponsePlcTagTables
+                {
+                    Message = $"Tag tables with regex '{regexName}' retrieved from '{softwarePath}'",
+                    Items = responseList,
+                    Meta = new JsonObject
+                    {
+                        ["timestamp"] = DateTime.Now,
+                        ["success"] = true
+                    }
+                };
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Unexpected error retrieving PLC tag tables from '{softwarePath}': {ex.Message}", ex, McpErrorCode.InternalError);
+            }
+        }
+
+        [McpServerTool(Name = "GetPlcTags"), Description("Get a list of PLC tags from a specific tag table")]
+        public static ResponsePlcTags GetPlcTags(
+            [Description("softwarePath: defines the path in the project structure to the plc software")] string softwarePath,
+            [Description("tagTablePath: path to the tag table (e.g. 'Default tag table' or 'Group/MyTable')")] string tagTablePath)
+        {
+            try
+            {
+                var list = Portal.GetPlcTags(softwarePath, tagTablePath);
+
+                var responseList = new List<ResponsePlcTagInfo>();
+                foreach (var tag in list)
+                {
+                    if (tag != null)
+                    {
+                        string comment = "";
+                        try
+                        {
+                            comment = tag.Comment?.ToString() ?? "";
+                        }
+                        catch (Exception)
+                        {
+                            // Comment access may fail
+                        }
+
+                        responseList.Add(new ResponsePlcTagInfo
+                        {
+                            Name = tag.Name,
+                            DataTypeName = tag.DataTypeName,
+                            LogicalAddress = tag.LogicalAddress,
+                            Comment = comment
+                        });
+                    }
+                }
+
+                return new ResponsePlcTags
+                {
+                    Message = $"Tags retrieved from table '{tagTablePath}' in '{softwarePath}'",
+                    Items = responseList,
+                    Meta = new JsonObject
+                    {
+                        ["timestamp"] = DateTime.Now,
+                        ["success"] = true
+                    }
+                };
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Unexpected error retrieving PLC tags from '{tagTablePath}' in '{softwarePath}': {ex.Message}", ex, McpErrorCode.InternalError);
+            }
+        }
+
+        [McpServerTool(Name = "ExportPlcTagTable"), Description("Export a PLC tag table from plc software to file")]
+        public static ResponseExportPlcTagTable ExportPlcTagTable(
+            [Description("softwarePath: defines the path in the project structure to the plc software")] string softwarePath,
+            [Description("tagTablePath: path to the tag table (e.g. 'Default tag table' or 'Group/MyTable')")] string tagTablePath,
+            [Description("exportPath: defines the directory path where to export the tag table")] string exportPath)
+        {
+            try
+            {
+                var tagTable = Portal.ExportPlcTagTable(softwarePath, tagTablePath, exportPath);
+                if (tagTable != null)
+                {
+                    return new ResponseExportPlcTagTable
+                    {
+                        Message = $"Tag table exported from '{tagTablePath}' to '{exportPath}'",
+                        Meta = new JsonObject
+                        {
+                            ["timestamp"] = DateTime.Now,
+                            ["success"] = true
+                        }
+                    };
+                }
+                throw new McpException($"Failed exporting tag table '{tagTablePath}'", McpErrorCode.InternalError);
+            }
+            catch (TiaMcpServer.Siemens.PortalException pex)
+            {
+                switch (pex.Code)
+                {
+                    case TiaMcpServer.Siemens.PortalErrorCode.NotFound:
+                        throw new McpException($"Tag table not found: '{tagTablePath}'", McpErrorCode.InvalidParams);
+                    case TiaMcpServer.Siemens.PortalErrorCode.ExportFailed:
+                        var reason = pex.InnerException?.Message?.Trim();
+                        var msg = "Failed to export tag table.";
+                        if (!string.IsNullOrEmpty(reason)) msg += $" Reason: {reason}";
+                        throw new McpException(msg, McpErrorCode.InternalError);
+                    case TiaMcpServer.Siemens.PortalErrorCode.InvalidState:
+                        throw new McpException(pex.Message, McpErrorCode.InvalidParams);
+                }
+                throw new McpException(pex.Message, McpErrorCode.InternalError);
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Unexpected error exporting tag table '{tagTablePath}': {ex.Message}", ex, McpErrorCode.InternalError);
+            }
+        }
+
+        [McpServerTool(Name = "ImportPlcTagTable"), Description("Import a PLC tag table into plc software from file")]
+        public static ResponseImportPlcTagTable ImportPlcTagTable(
+            [Description("softwarePath: defines the path in the project structure to the plc software")] string softwarePath,
+            [Description("groupPath: optional group path within the tag table structure (empty for root)")] string groupPath,
+            [Description("importPath: defines the path to the XML file to import")] string importPath)
+        {
+            try
+            {
+                var success = Portal.ImportPlcTagTable(softwarePath, groupPath, importPath);
+
+                if (success)
+                {
+                    return new ResponseImportPlcTagTable
+                    {
+                        Message = $"Tag table imported from '{importPath}' into '{softwarePath}'",
+                        Meta = new JsonObject
+                        {
+                            ["timestamp"] = DateTime.Now,
+                            ["success"] = true
+                        }
+                    };
+                }
+                else
+                {
+                    throw new McpException($"Failed to import tag table from '{importPath}'", McpErrorCode.InternalError);
+                }
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Unexpected error importing tag table from '{importPath}': {ex.Message}", ex, McpErrorCode.InternalError);
+            }
+        }
+
+        #endregion
+
+        #region HMI
+
+        [McpServerTool(Name = "GetHmiScreens"), Description("Get a list of HMI screens from an HMI device (WinCC Comfort/Basic or Unified)")]
+        public static ResponseHmiScreens GetHmiScreens(
+            [Description("softwarePath: defines the path in the project structure to the HMI software")] string softwarePath,
+            [Description("regexName: defines the name or regular expression to filter screens. Use empty string (default) to find all")] string regexName = "")
+        {
+            try
+            {
+                var list = Portal.GetHmiScreens(softwarePath, regexName);
+
+                var responseList = new List<ResponseHmiScreenInfo>();
+                foreach (var screen in list)
+                {
+                    var screenName = "";
+                    try { screenName = screen.GetType().GetProperty("Name")?.GetValue(screen)?.ToString() ?? ""; }
+                    catch (Exception) { }
+
+                    responseList.Add(new ResponseHmiScreenInfo
+                    {
+                        Name = screenName
+                    });
+                }
+
+                return new ResponseHmiScreens
+                {
+                    Message = $"HMI screens with regex '{regexName}' retrieved from '{softwarePath}'",
+                    Items = responseList,
+                    Meta = new JsonObject
+                    {
+                        ["timestamp"] = DateTime.Now,
+                        ["success"] = true
+                    }
+                };
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Unexpected error retrieving HMI screens from '{softwarePath}': {ex.Message}", ex, McpErrorCode.InternalError);
+            }
+        }
+
+        [McpServerTool(Name = "ExportHmiScreen"), Description("Export an HMI screen to file")]
+        public static ResponseExportHmiScreen ExportHmiScreen(
+            [Description("softwarePath: defines the path in the project structure to the HMI software")] string softwarePath,
+            [Description("screenName: name of the HMI screen to export")] string screenName,
+            [Description("exportPath: defines the directory path where to export the screen")] string exportPath)
+        {
+            try
+            {
+                var success = Portal.ExportHmiScreen(softwarePath, screenName, exportPath);
+                if (success)
+                {
+                    return new ResponseExportHmiScreen
+                    {
+                        Message = $"HMI screen '{screenName}' exported to '{exportPath}'",
+                        Meta = new JsonObject
+                        {
+                            ["timestamp"] = DateTime.Now,
+                            ["success"] = true
+                        }
+                    };
+                }
+                throw new McpException($"Failed exporting HMI screen '{screenName}'", McpErrorCode.InternalError);
+            }
+            catch (TiaMcpServer.Siemens.PortalException pex)
+            {
+                switch (pex.Code)
+                {
+                    case TiaMcpServer.Siemens.PortalErrorCode.NotFound:
+                        throw new McpException(pex.Message, McpErrorCode.InvalidParams);
+                    case TiaMcpServer.Siemens.PortalErrorCode.ExportFailed:
+                        throw new McpException(pex.Message, McpErrorCode.InternalError);
+                }
+                throw new McpException(pex.Message, McpErrorCode.InternalError);
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Unexpected error exporting HMI screen '{screenName}': {ex.Message}", ex, McpErrorCode.InternalError);
+            }
+        }
+
+        [McpServerTool(Name = "ImportHmiScreen"), Description("Import an HMI screen from file")]
+        public static ResponseImportHmiScreen ImportHmiScreen(
+            [Description("softwarePath: defines the path in the project structure to the HMI software")] string softwarePath,
+            [Description("importPath: defines the path to the XML file to import")] string importPath)
+        {
+            try
+            {
+                var success = Portal.ImportHmiScreen(softwarePath, importPath);
+                if (success)
+                {
+                    return new ResponseImportHmiScreen
+                    {
+                        Message = $"HMI screen imported from '{importPath}'",
+                        Meta = new JsonObject
+                        {
+                            ["timestamp"] = DateTime.Now,
+                            ["success"] = true
+                        }
+                    };
+                }
+                throw new McpException($"Failed to import HMI screen from '{importPath}'", McpErrorCode.InternalError);
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Unexpected error importing HMI screen from '{importPath}': {ex.Message}", ex, McpErrorCode.InternalError);
+            }
+        }
+
+        #endregion
+
+        #region Libraries
+
+        [McpServerTool(Name = "GetLibraries"), Description("Get a list of available libraries (project library and global libraries)")]
+        public static ResponseLibraries GetLibraries()
+        {
+            try
+            {
+                var list = Portal.GetLibraries();
+
+                return new ResponseLibraries
+                {
+                    Message = $"Found {list.Count} libraries",
+                    Items = list,
+                    Meta = new JsonObject
+                    {
+                        ["timestamp"] = DateTime.Now,
+                        ["success"] = true
+                    }
+                };
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Unexpected error retrieving libraries: {ex.Message}", ex, McpErrorCode.InternalError);
+            }
+        }
+
+        [McpServerTool(Name = "GetLibraryMasterCopies"), Description("Get a list of master copies from a library")]
+        public static ResponseLibraryMasterCopies GetLibraryMasterCopies(
+            [Description("libraryType: 'project' for project library or 'global' for first global library")] string libraryType,
+            [Description("folderPath: optional folder path within the library (e.g. 'Folder/Subfolder'). Empty for root")] string folderPath = "")
+        {
+            try
+            {
+                var list = Portal.GetLibraryMasterCopies(libraryType, folderPath);
+
+                return new ResponseLibraryMasterCopies
+                {
+                    Message = $"Found {list.Count} master copies in {libraryType} library",
+                    Items = list,
+                    Meta = new JsonObject
+                    {
+                        ["timestamp"] = DateTime.Now,
+                        ["success"] = true
+                    }
+                };
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Unexpected error retrieving master copies: {ex.Message}", ex, McpErrorCode.InternalError);
+            }
+        }
+
+        [McpServerTool(Name = "CopyFromLibrary"), Description("Copy a master copy from a library into the PLC program")]
+        public static ResponseCopyFromLibrary CopyFromLibrary(
+            [Description("softwarePath: defines the path in the project structure to the plc software")] string softwarePath,
+            [Description("libraryType: 'project' for project library or 'global' for first global library")] string libraryType,
+            [Description("masterCopyPath: path to the master copy in the library (e.g. 'Folder/BlockName')")] string masterCopyPath,
+            [Description("targetGroupPath: optional target group path in the PLC program (empty for root)")] string targetGroupPath = "")
+        {
+            try
+            {
+                var success = Portal.CopyFromLibrary(softwarePath, libraryType, masterCopyPath, targetGroupPath);
+                if (success)
+                {
+                    return new ResponseCopyFromLibrary
+                    {
+                        Message = $"Master copy '{masterCopyPath}' copied from {libraryType} library to '{softwarePath}'",
+                        Meta = new JsonObject
+                        {
+                            ["timestamp"] = DateTime.Now,
+                            ["success"] = true
+                        }
+                    };
+                }
+                throw new McpException($"Failed to copy '{masterCopyPath}' from {libraryType} library", McpErrorCode.InternalError);
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Unexpected error copying from library: {ex.Message}", ex, McpErrorCode.InternalError);
+            }
+        }
+
+        #endregion
+
+        #region Network
+
+        [McpServerTool(Name = "GetNetworkInterfaces"), Description("Get network interfaces and their configuration for a device")]
+        public static ResponseNetworkInterfaces GetNetworkInterfaces(
+            [Description("devicePath: defines the path in the project structure to the device (e.g. 'PLC_1')")] string devicePath)
+        {
+            try
+            {
+                var list = Portal.GetNetworkInterfaces(devicePath);
+
+                return new ResponseNetworkInterfaces
+                {
+                    Message = $"Found {list.Count} network interfaces for '{devicePath}'",
+                    Items = list,
+                    Meta = new JsonObject
+                    {
+                        ["timestamp"] = DateTime.Now,
+                        ["success"] = true
+                    }
+                };
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Unexpected error retrieving network interfaces for '{devicePath}': {ex.Message}", ex, McpErrorCode.InternalError);
+            }
+        }
+
+        [McpServerTool(Name = "GetSubnets"), Description("Get a list of all subnets in the project")]
+        public static ResponseSubnets GetSubnets()
+        {
+            try
+            {
+                var list = Portal.GetSubnets();
+
+                return new ResponseSubnets
+                {
+                    Message = $"Found {list.Count} subnets",
+                    Items = list,
+                    Meta = new JsonObject
+                    {
+                        ["timestamp"] = DateTime.Now,
+                        ["success"] = true
+                    }
+                };
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Unexpected error retrieving subnets: {ex.Message}", ex, McpErrorCode.InternalError);
+            }
         }
 
         #endregion

@@ -5,10 +5,13 @@ using Siemens.Engineering.Hmi;
 using Siemens.Engineering.HmiUnified;
 using Siemens.Engineering.HW;
 using Siemens.Engineering.HW.Features;
+using Siemens.Engineering.Library;
+using Siemens.Engineering.Library.MasterCopies;
 using Siemens.Engineering.Multiuser;
 using Siemens.Engineering.Safety;
 using Siemens.Engineering.SW;
 using Siemens.Engineering.SW.Blocks;
+using Siemens.Engineering.SW.Tags;
 using Siemens.Engineering.SW.Types;
 using System;
 using System.Collections.Generic;
@@ -374,6 +377,45 @@ namespace TiaMcpServer.Siemens
             return true;
         }
 
+        public bool CreateProject(string projectPath, string projectName)
+        {
+            _logger?.LogInformation($"Creating project: {projectName} at {projectPath}");
+
+            if (IsPortalNull())
+            {
+                return false;
+            }
+
+            if (_project != null)
+            {
+                (_project as Project)?.Close();
+                _project = null;
+            }
+
+            if (_session != null)
+            {
+                _session.Close();
+                _session = null;
+            }
+
+            try
+            {
+                var di = new DirectoryInfo(projectPath);
+                if (!di.Exists)
+                {
+                    di.Create();
+                }
+
+                _project = _portal.Projects.Create(di, projectName);
+                return _project != null;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "CreateProject failed for {ProjectPath} {ProjectName}", projectPath, projectName);
+                return false;
+            }
+        }
+
         #endregion
 
         #region session
@@ -670,6 +712,38 @@ namespace TiaMcpServer.Siemens
             return null; // "Error";
         }
 
+        public CompilerResult? CompileHardware(string devicePath)
+        {
+            _logger?.LogInformation($"Compiling hardware for device: {devicePath}");
+
+            if (IsProjectNull())
+            {
+                return null;
+            }
+
+            var device = GetDeviceByPath(devicePath);
+            if (device == null)
+            {
+                throw new PortalException(PortalErrorCode.NotFound, $"Device not found: {devicePath}");
+            }
+
+            try
+            {
+                ICompilable compileService = device.GetService<ICompilable>();
+                CompilerResult result = compileService.Compile();
+                return result;
+            }
+            catch (PortalException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "CompileHardware failed for {DevicePath}", devicePath);
+                return null;
+            }
+        }
+
         #endregion
 
         #region blocks/types
@@ -878,6 +952,666 @@ namespace TiaMcpServer.Siemens
 
             return list;
         }
+
+        #region hmi
+
+        public List<IEngineeringObject> GetHmiScreens(string softwarePath, string regexName = "")
+        {
+            _logger?.LogInformation("Getting HMI screens...");
+
+            if (IsProjectNull())
+            {
+                return [];
+            }
+
+            var list = new List<IEngineeringObject>();
+
+            try
+            {
+                var softwareContainer = GetSoftwareContainer(softwarePath);
+
+                // WinCC Unified (V19+)
+                if (softwareContainer?.Software is HmiSoftware hmiSoftware)
+                {
+                    foreach (var screen in hmiSoftware.Screens)
+                    {
+                        try
+                        {
+                            if (!string.IsNullOrEmpty(regexName) && !Regex.IsMatch(screen.Name, regexName, RegexOptions.IgnoreCase))
+                            {
+                                continue;
+                            }
+                        }
+                        catch (Exception)
+                        {
+                            continue;
+                        }
+
+                        list.Add(screen);
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Silently fail
+            }
+
+            return list;
+        }
+
+        public bool ExportHmiScreen(string softwarePath, string screenName, string exportPath)
+        {
+            _logger?.LogInformation($"Exporting HMI screen: {screenName}");
+
+            try
+            {
+                if (IsProjectNull())
+                {
+                    throw new PortalException(PortalErrorCode.InvalidState, "No project is open in TIA Portal");
+                }
+
+                var softwareContainer = GetSoftwareContainer(softwarePath);
+
+                IEngineeringObject? screen = null;
+
+                if (softwareContainer?.Software is HmiSoftware hmiSoftware)
+                {
+                    foreach (var s in hmiSoftware.Screens)
+                    {
+                        if (s.Name.Equals(screenName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            screen = s;
+                            break;
+                        }
+                    }
+                }
+
+                if (screen == null)
+                {
+                    throw new PortalException(PortalErrorCode.NotFound, $"HMI screen not found: {screenName}. Note: only WinCC Unified screens are supported.");
+                }
+
+                var filePath = Path.Combine(exportPath, $"{screenName}.xml");
+                if (File.Exists(filePath))
+                {
+                    File.Delete(filePath);
+                }
+
+                // Use reflection to call Export since the concrete HMI screen type varies
+                var exportMethod = screen.GetType().GetMethod("Export", new[] { typeof(FileInfo), typeof(ExportOptions) });
+                if (exportMethod != null)
+                {
+                    exportMethod.Invoke(screen, new object[] { new FileInfo(filePath), ExportOptions.None });
+                }
+                else
+                {
+                    throw new PortalException(PortalErrorCode.ExportFailed, "Screen does not support export");
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                var pex = ex as PortalException ?? new PortalException(PortalErrorCode.ExportFailed, "Export HMI screen failed", null, ex);
+
+                if (!pex.Data.Contains("softwarePath")) pex.Data["softwarePath"] = softwarePath;
+                if (!pex.Data.Contains("screenName")) pex.Data["screenName"] = screenName;
+                if (!pex.Data.Contains("exportPath")) pex.Data["exportPath"] = exportPath;
+
+                _logger?.LogError(pex, "ExportHmiScreen failed for {SoftwarePath} {ScreenName}", softwarePath, screenName);
+                throw pex;
+            }
+        }
+
+        public bool ImportHmiScreen(string softwarePath, string importPath)
+        {
+            _logger?.LogInformation($"Importing HMI screen from: {importPath}");
+
+            if (IsProjectNull())
+            {
+                return false;
+            }
+
+            try
+            {
+                var softwareContainer = GetSoftwareContainer(softwarePath);
+
+                var fileInfo = new FileInfo(importPath);
+                if (!fileInfo.Exists)
+                {
+                    return false;
+                }
+
+                if (softwareContainer?.Software is HmiSoftware hmiSoftware)
+                {
+                    // Use reflection since HmiScreenComposition may not have Import directly
+                    var screens = hmiSoftware.Screens;
+                    var importMethod = screens.GetType().GetMethod("Import", new[] { typeof(FileInfo), typeof(ImportOptions) });
+                    if (importMethod != null)
+                    {
+                        importMethod.Invoke(screens, new object[] { fileInfo, ImportOptions.Override });
+                        return true;
+                    }
+                    return false;
+                }
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+
+            return false;
+        }
+
+        #endregion
+
+        #region plc tag tables
+
+        public List<PlcTagTable> GetPlcTagTables(string softwarePath, string regexName = "")
+        {
+            _logger?.LogInformation("Getting PLC tag tables...");
+
+            if (IsProjectNull())
+            {
+                return [];
+            }
+
+            var list = new List<PlcTagTable>();
+
+            try
+            {
+                var softwareContainer = GetSoftwareContainer(softwarePath);
+                if (softwareContainer?.Software is PlcSoftware plcSoftware)
+                {
+                    var group = plcSoftware?.TagTableGroup;
+
+                    if (group != null)
+                    {
+                        GetPlcTagTablesRecursive(group, list, regexName);
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Silently fail, return empty list
+            }
+
+            return list;
+        }
+
+        public List<PlcTag> GetPlcTags(string softwarePath, string tagTablePath)
+        {
+            _logger?.LogInformation($"Getting PLC tags from table: {tagTablePath}");
+
+            if (IsProjectNull())
+            {
+                return [];
+            }
+
+            var list = new List<PlcTag>();
+
+            try
+            {
+                var tagTable = GetPlcTagTableByPath(softwarePath, tagTablePath);
+                if (tagTable != null)
+                {
+                    foreach (var tag in tagTable.Tags)
+                    {
+                        list.Add(tag);
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Silently fail, return empty list
+            }
+
+            return list;
+        }
+
+        public PlcTagTable? ExportPlcTagTable(string softwarePath, string tagTablePath, string exportPath)
+        {
+            _logger?.LogInformation($"Exporting PLC tag table: {tagTablePath}");
+
+            try
+            {
+                if (IsProjectNull())
+                {
+                    throw new PortalException(PortalErrorCode.InvalidState, "No project is open in TIA Portal");
+                }
+
+                var tagTable = GetPlcTagTableByPath(softwarePath, tagTablePath);
+
+                if (tagTable == null)
+                {
+                    throw new PortalException(PortalErrorCode.NotFound, "Tag table not found");
+                }
+
+                exportPath = Path.Combine(exportPath, $"{tagTable.Name}.xml");
+
+                if (File.Exists(exportPath))
+                {
+                    File.Delete(exportPath);
+                }
+
+                tagTable.Export(new FileInfo(exportPath), ExportOptions.None);
+
+                return tagTable;
+            }
+            catch (Exception ex)
+            {
+                var pex = ex as PortalException ?? new PortalException(PortalErrorCode.ExportFailed, "Export failed", null, ex);
+
+                if (!pex.Data.Contains("softwarePath")) pex.Data["softwarePath"] = softwarePath;
+                if (!pex.Data.Contains("tagTablePath")) pex.Data["tagTablePath"] = tagTablePath;
+                if (!pex.Data.Contains("exportPath")) pex.Data["exportPath"] = exportPath;
+
+                _logger?.LogError(pex, "ExportPlcTagTable failed for {SoftwarePath} {TagTablePath} -> {ExportPath}", softwarePath, tagTablePath, exportPath);
+                throw pex;
+            }
+        }
+
+        public bool ImportPlcTagTable(string softwarePath, string groupPath, string importPath)
+        {
+            _logger?.LogInformation($"Importing PLC tag table from: {importPath}");
+
+            if (IsProjectNull())
+            {
+                return false;
+            }
+
+            var softwareContainer = GetSoftwareContainer(softwarePath);
+            if (softwareContainer?.Software is PlcSoftware plcSoftware)
+            {
+                var tagTableGroup = plcSoftware?.TagTableGroup;
+
+                if (tagTableGroup != null)
+                {
+                    var group = GetPlcTagTableGroupByPath(softwarePath, groupPath);
+                    if (group == null)
+                    {
+                        return false;
+                    }
+
+                    try
+                    {
+                        var fileInfo = new FileInfo(importPath);
+                        if (fileInfo.Exists)
+                        {
+                            var list = group.TagTables.Import(fileInfo, ImportOptions.Override);
+                            if (list != null && list.Count > 0)
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        #endregion
+
+        #region libraries
+
+        public List<string> GetLibraries()
+        {
+            _logger?.LogInformation("Getting libraries...");
+
+            var list = new List<string>();
+
+            if (IsProjectNull())
+            {
+                return list;
+            }
+
+            try
+            {
+                // Project library
+                if (_project is Project project)
+                {
+                    var projLib = project.ProjectLibrary;
+                    if (projLib != null)
+                    {
+                        list.Add($"[ProjectLibrary] {project.Name}");
+                    }
+                }
+
+                // Global libraries
+                if (_portal != null)
+                {
+                    foreach (var lib in _portal.GlobalLibraries)
+                    {
+                        list.Add($"[GlobalLibrary] {lib.Name}");
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Silently fail
+            }
+
+            return list;
+        }
+
+        public List<string> GetLibraryMasterCopies(string libraryType, string folderPath = "")
+        {
+            _logger?.LogInformation($"Getting library master copies from: {libraryType}/{folderPath}");
+
+            var list = new List<string>();
+
+            if (IsProjectNull())
+            {
+                return list;
+            }
+
+            try
+            {
+                MasterCopyFolder? rootFolder = null;
+
+                if (libraryType.Equals("project", StringComparison.OrdinalIgnoreCase) && _project is Project project)
+                {
+                    rootFolder = project.ProjectLibrary?.MasterCopyFolder;
+                }
+                else if (libraryType.Equals("global", StringComparison.OrdinalIgnoreCase) && _portal != null)
+                {
+                    foreach (var lib in _portal.GlobalLibraries)
+                    {
+                        rootFolder = lib.MasterCopyFolder;
+                        break; // Use first global library
+                    }
+                }
+
+                if (rootFolder == null)
+                {
+                    return list;
+                }
+
+                // Navigate to subfolder if specified
+                var folder = rootFolder;
+                if (!string.IsNullOrEmpty(folderPath))
+                {
+                    var segments = folderPath.Split(['/'], StringSplitOptions.RemoveEmptyEntries);
+                    foreach (var seg in segments)
+                    {
+                        MasterCopyFolder? nextFolder = null;
+                        foreach (var sub in folder.Folders)
+                        {
+                            if (sub.Name.Equals(seg, StringComparison.OrdinalIgnoreCase))
+                            {
+                                nextFolder = sub;
+                                break;
+                            }
+                        }
+                        if (nextFolder == null)
+                        {
+                            return list;
+                        }
+                        folder = nextFolder;
+                    }
+                }
+
+                // List master copies
+                GetMasterCopiesRecursive(folder, list, "");
+            }
+            catch (Exception)
+            {
+                // Silently fail
+            }
+
+            return list;
+        }
+
+        private void GetMasterCopiesRecursive(MasterCopyFolder folder, List<string> list, string prefix)
+        {
+            foreach (var mc in folder.MasterCopies)
+            {
+                list.Add(string.IsNullOrEmpty(prefix) ? mc.Name : $"{prefix}/{mc.Name}");
+            }
+
+            foreach (var sub in folder.Folders)
+            {
+                var subPrefix = string.IsNullOrEmpty(prefix) ? sub.Name : $"{prefix}/{sub.Name}";
+                GetMasterCopiesRecursive(sub, list, subPrefix);
+            }
+        }
+
+        public bool CopyFromLibrary(string softwarePath, string libraryType, string masterCopyPath, string targetGroupPath = "")
+        {
+            _logger?.LogInformation($"Copying from library: {libraryType}/{masterCopyPath} -> {softwarePath}/{targetGroupPath}");
+
+            if (IsProjectNull())
+            {
+                return false;
+            }
+
+            try
+            {
+                MasterCopyFolder? rootFolder = null;
+
+                if (libraryType.Equals("project", StringComparison.OrdinalIgnoreCase) && _project is Project project)
+                {
+                    rootFolder = project.ProjectLibrary?.MasterCopyFolder;
+                }
+                else if (libraryType.Equals("global", StringComparison.OrdinalIgnoreCase) && _portal != null)
+                {
+                    foreach (var lib in _portal.GlobalLibraries)
+                    {
+                        rootFolder = lib.MasterCopyFolder;
+                        break;
+                    }
+                }
+
+                if (rootFolder == null)
+                {
+                    return false;
+                }
+
+                // Navigate to master copy
+                var segments = masterCopyPath.Split(['/'], StringSplitOptions.RemoveEmptyEntries);
+                var folder = rootFolder;
+
+                for (int i = 0; i < segments.Length - 1; i++)
+                {
+                    MasterCopyFolder? nextFolder = null;
+                    foreach (var sub in folder.Folders)
+                    {
+                        if (sub.Name.Equals(segments[i], StringComparison.OrdinalIgnoreCase))
+                        {
+                            nextFolder = sub;
+                            break;
+                        }
+                    }
+                    if (nextFolder == null) return false;
+                    folder = nextFolder;
+                }
+
+                MasterCopy? masterCopy = null;
+                var mcName = segments[segments.Length - 1];
+                foreach (var mc in folder.MasterCopies)
+                {
+                    if (mc.Name.Equals(mcName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        masterCopy = mc;
+                        break;
+                    }
+                }
+
+                if (masterCopy == null) return false;
+
+                // Get target block group
+                var softwareContainer = GetSoftwareContainer(softwarePath);
+                if (softwareContainer?.Software is PlcSoftware plcSoftware)
+                {
+                    PlcBlockGroup targetGroup;
+                    if (string.IsNullOrEmpty(targetGroupPath))
+                    {
+                        targetGroup = plcSoftware.BlockGroup;
+                    }
+                    else
+                    {
+                        var group = GetPlcBlockGroupByPath(softwarePath, targetGroupPath);
+                        if (group == null) return false;
+                        targetGroup = group;
+                    }
+
+                    targetGroup.Blocks.CreateFrom(masterCopy);
+                    return true;
+                }
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+
+            return false;
+        }
+
+        #endregion
+
+        #region network
+
+        public List<Dictionary<string, string>> GetNetworkInterfaces(string devicePath)
+        {
+            _logger?.LogInformation($"Getting network interfaces for: {devicePath}");
+
+            var list = new List<Dictionary<string, string>>();
+
+            if (IsProjectNull())
+            {
+                return list;
+            }
+
+            try
+            {
+                var device = GetDeviceByPath(devicePath);
+                if (device == null)
+                {
+                    return list;
+                }
+
+                GetNetworkInterfacesRecursive(device.DeviceItems, list);
+            }
+            catch (Exception)
+            {
+                // Silently fail
+            }
+
+            return list;
+        }
+
+        private void GetNetworkInterfacesRecursive(DeviceItemComposition items, List<Dictionary<string, string>> list)
+        {
+            foreach (DeviceItem item in items)
+            {
+                try
+                {
+                    var netInterface = item.GetService<NetworkInterface>();
+                    if (netInterface != null)
+                    {
+                        foreach (var node in netInterface.Nodes)
+                        {
+                            var info = new Dictionary<string, string>
+                            {
+                                ["DeviceItem"] = item.Name,
+                                ["NodeName"] = node.Name ?? ""
+                            };
+
+                            // Get address via node attributes
+                            try
+                            {
+                                foreach (var attr in ((IEngineeringObject)node).GetAttributeInfos())
+                                {
+                                    try
+                                    {
+                                        var val = ((IEngineeringObject)node).GetAttribute(attr.Name);
+                                        if (val != null)
+                                        {
+                                            info[attr.Name] = val.ToString() ?? "";
+                                        }
+                                    }
+                                    catch (Exception) { }
+                                }
+                            }
+                            catch (Exception) { }
+
+                            if (node.ConnectedSubnet != null)
+                            {
+                                info["SubnetName"] = node.ConnectedSubnet.Name ?? "";
+                            }
+
+                            list.Add(info);
+                        }
+                    }
+                }
+                catch (Exception) { }
+
+                // Recurse into sub-items
+                if (item.DeviceItems != null && item.DeviceItems.Count > 0)
+                {
+                    GetNetworkInterfacesRecursive(item.DeviceItems, list);
+                }
+            }
+        }
+
+        public List<Dictionary<string, string>> GetSubnets()
+        {
+            _logger?.LogInformation("Getting subnets...");
+
+            var list = new List<Dictionary<string, string>>();
+
+            if (IsProjectNull())
+            {
+                return list;
+            }
+
+            try
+            {
+                if (_project is Project project)
+                {
+                    foreach (var subnet in project.Subnets)
+                    {
+                        var info = new Dictionary<string, string>
+                        {
+                            ["Name"] = subnet.Name ?? "",
+                            ["TypeIdentifier"] = subnet.TypeIdentifier ?? ""
+                        };
+
+                        try
+                        {
+                            foreach (var attr in ((IEngineeringObject)subnet).GetAttributeInfos())
+                            {
+                                try
+                                {
+                                    var val = ((IEngineeringObject)subnet).GetAttribute(attr.Name);
+                                    if (val != null)
+                                    {
+                                        info[attr.Name] = val.ToString() ?? "";
+                                    }
+                                }
+                                catch (Exception) { }
+                            }
+                        }
+                        catch (Exception) { }
+
+                        list.Add(info);
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Silently fail
+            }
+
+            return list;
+        }
+
+        #endregion
 
         public PlcBlock? ExportBlock(string softwarePath, string blockPath, string exportPath, bool preservePath = false)
         {
@@ -2586,6 +3320,128 @@ namespace TiaMcpServer.Siemens
             return path;
         }
 
+        private PlcTagTableGroup? GetPlcTagTableGroupByPath(string softwarePath, string groupPath)
+        {
+            if (_project == null)
+            {
+                return null;
+            }
+
+            var softwareContainer = GetSoftwareContainer(softwarePath);
+            if (softwareContainer?.Software is PlcSoftware plcSoftware)
+            {
+                if (plcSoftware?.TagTableGroup == null)
+                {
+                    return null;
+                }
+
+                if (string.IsNullOrEmpty(groupPath))
+                {
+                    return plcSoftware.TagTableGroup;
+                }
+
+                var groupNames = groupPath.Split(['/'], StringSplitOptions.RemoveEmptyEntries);
+
+                PlcTagTableUserGroup? currentGroup = null;
+
+                // First level: search in TagTableGroup.Groups
+                var firstGroupName = groupNames[0];
+                foreach (PlcTagTableUserGroup g in plcSoftware.TagTableGroup.Groups)
+                {
+                    if (g.Name.Equals(firstGroupName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        currentGroup = g;
+                        break;
+                    }
+                }
+
+                if (currentGroup == null)
+                {
+                    return null;
+                }
+
+                // Subsequent levels
+                for (int i = 1; i < groupNames.Length; i++)
+                {
+                    PlcTagTableUserGroup? nextGroup = null;
+                    foreach (PlcTagTableUserGroup g in currentGroup.Groups)
+                    {
+                        if (g.Name.Equals(groupNames[i], StringComparison.OrdinalIgnoreCase))
+                        {
+                            nextGroup = g;
+                            break;
+                        }
+                    }
+
+                    if (nextGroup == null)
+                    {
+                        return null;
+                    }
+
+                    currentGroup = nextGroup;
+                }
+
+                return currentGroup;
+            }
+
+            return null;
+        }
+
+        private PlcTagTable? GetPlcTagTableByPath(string softwarePath, string tagTablePath)
+        {
+            if (_project == null)
+            {
+                return null;
+            }
+
+            // Split path: last segment is table name, rest is group path
+            var segments = tagTablePath.Split(['/'], StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length == 0)
+            {
+                return null;
+            }
+
+            var tableName = segments[segments.Length - 1];
+
+            var softwareContainer = GetSoftwareContainer(softwarePath);
+            if (softwareContainer?.Software is PlcSoftware plcSoftware)
+            {
+                if (plcSoftware?.TagTableGroup == null)
+                {
+                    return null;
+                }
+
+                if (segments.Length == 1)
+                {
+                    // Search in root tag table group
+                    foreach (var table in plcSoftware.TagTableGroup.TagTables)
+                    {
+                        if (table.Name.Equals(tableName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return table;
+                        }
+                    }
+                    return null;
+                }
+
+                // Navigate to subgroup, then find table
+                var groupPath = string.Join("/", segments, 0, segments.Length - 1);
+                var group = GetPlcTagTableGroupByPath(softwarePath, groupPath);
+                if (group is PlcTagTableUserGroup userGroup)
+                {
+                    foreach (var table in userGroup.TagTables)
+                    {
+                        if (table.Name.Equals(tableName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return table;
+                        }
+                    }
+                }
+            }
+
+            return null;
+        }
+
         #endregion
 
         #region GetRecursive ...
@@ -2691,6 +3547,66 @@ namespace TiaMcpServer.Siemens
             foreach (PlcTypeGroup subgroup in group.Groups)
             {
                 anySuccess = GetTypesRecursive(subgroup, list, regexName);
+            }
+
+            return anySuccess;
+        }
+
+        private bool GetPlcTagTablesRecursive(PlcTagTableGroup group, List<PlcTagTable> list, string regexName = "")
+        {
+            var anySuccess = false;
+
+            foreach (var table in group.TagTables)
+            {
+                try
+                {
+                    if (!string.IsNullOrEmpty(regexName) && !Regex.IsMatch(table.Name, regexName, RegexOptions.IgnoreCase))
+                    {
+                        continue;
+                    }
+                }
+                catch (Exception)
+                {
+                    continue;
+                }
+
+                list.Add(table);
+                anySuccess = true;
+            }
+
+            foreach (PlcTagTableUserGroup subgroup in group.Groups)
+            {
+                anySuccess = GetPlcTagTablesRecursive(subgroup, list, regexName);
+            }
+
+            return anySuccess;
+        }
+
+        private bool GetPlcTagTablesRecursive(PlcTagTableUserGroup group, List<PlcTagTable> list, string regexName = "")
+        {
+            var anySuccess = false;
+
+            foreach (var table in group.TagTables)
+            {
+                try
+                {
+                    if (!string.IsNullOrEmpty(regexName) && !Regex.IsMatch(table.Name, regexName, RegexOptions.IgnoreCase))
+                    {
+                        continue;
+                    }
+                }
+                catch (Exception)
+                {
+                    continue;
+                }
+
+                list.Add(table);
+                anySuccess = true;
+            }
+
+            foreach (PlcTagTableUserGroup subgroup in group.Groups)
+            {
+                anySuccess = GetPlcTagTablesRecursive(subgroup, list, regexName);
             }
 
             return anySuccess;

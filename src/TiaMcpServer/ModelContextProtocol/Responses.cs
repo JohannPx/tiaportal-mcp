@@ -186,4 +186,86 @@ namespace TiaMcpServer.ModelContextProtocol
     {
         public IEnumerable<ResponseBlockInfo>? Items { get; set; }
     }
+
+    public class ResponseCreateProject : ResponseMessage
+    {
+    }
+
+    public class ResponseCompileHardware : ResponseMessage
+    {
+    }
+
+    public class ResponsePlcTagTableInfo : ResponseAttributes
+    {
+        public string? Name { get; set; }
+        public string? Description { get; set; }
+    }
+
+    public class ResponsePlcTagTables : ResponseMessage
+    {
+        public IEnumerable<ResponsePlcTagTableInfo>? Items { get; set; }
+    }
+
+    public class ResponsePlcTagInfo : ResponseMessage
+    {
+        public string? Name { get; set; }
+        public string? DataTypeName { get; set; }
+        public string? LogicalAddress { get; set; }
+        public string? Comment { get; set; }
+    }
+
+    public class ResponsePlcTags : ResponseMessage
+    {
+        public IEnumerable<ResponsePlcTagInfo>? Items { get; set; }
+    }
+
+    public class ResponseExportPlcTagTable : ResponseMessage
+    {
+    }
+
+    public class ResponseImportPlcTagTable : ResponseMessage
+    {
+    }
+
+    public class ResponseHmiScreenInfo : ResponseMessage
+    {
+        public string? Name { get; set; }
+    }
+
+    public class ResponseHmiScreens : ResponseMessage
+    {
+        public IEnumerable<ResponseHmiScreenInfo>? Items { get; set; }
+    }
+
+    public class ResponseExportHmiScreen : ResponseMessage
+    {
+    }
+
+    public class ResponseImportHmiScreen : ResponseMessage
+    {
+    }
+
+    public class ResponseLibraries : ResponseMessage
+    {
+        public IEnumerable<string>? Items { get; set; }
+    }
+
+    public class ResponseLibraryMasterCopies : ResponseMessage
+    {
+        public IEnumerable<string>? Items { get; set; }
+    }
+
+    public class ResponseCopyFromLibrary : ResponseMessage
+    {
+    }
+
+    public class ResponseNetworkInterfaces : ResponseMessage
+    {
+        public IEnumerable<Dictionary<string, string>>? Items { get; set; }
+    }
+
+    public class ResponseSubnets : ResponseMessage
+    {
+        public IEnumerable<Dictionary<string, string>>? Items { get; set; }
+    }
 }
