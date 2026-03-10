@@ -229,4 +229,4 @@ dotnet build -c Release
 
 ## VS Code Extension
 
-This MCP server is also available as a VS Code extension: [TIA-Portal MCP-Server](https://marketplace.visualstudio.com/items?itemName=JHeilingbrunner.vscode-tiaportal-mcp). The extension bundles the server and configures it automatically.
+The original version of this MCP server is also available as a VS Code extension: [TIA-Portal MCP-Server](https://marketplace.visualstudio.com/items?itemName=JHeilingbrunner.vscode-tiaportal-mcp). Note: the extension bundles v0.0.18 and does not include the additional tools from this fork.
