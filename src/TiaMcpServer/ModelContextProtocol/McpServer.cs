@@ -2505,6 +2505,303 @@ namespace TiaMcpServer.ModelContextProtocol
         }
 
         #endregion
+
+        #region hardware & network write
+
+        [McpServerTool(Name = "AddDevice"), Description("Add a new device (PLC, HMI, etc.) to the project from the hardware catalog")]
+        public static ResponseAddDevice AddDevice(
+            [Description("typeIdentifier: the order number / type identifier from the hardware catalog (e.g. 'OrderNumber:6ES7 517-3FP00-0AB0/V3.1')")] string typeIdentifier,
+            [Description("deviceName: the name for the new device (e.g. 'PLC_1')")] string deviceName,
+            [Description("name: the device item name (e.g. 'PLC_1')")] string name = "")
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(name)) name = deviceName;
+                Portal.AddDevice(typeIdentifier, deviceName, name);
+
+                return new ResponseAddDevice
+                {
+                    Message = $"Device '{deviceName}' added successfully with type '{typeIdentifier}'",
+                    Meta = new JsonObject
+                    {
+                        ["timestamp"] = DateTime.Now,
+                        ["success"] = true
+                    }
+                };
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Failed to add device '{deviceName}': {ex.Message}", ex, McpErrorCode.InternalError);
+            }
+        }
+
+        [McpServerTool(Name = "RemoveDevice"), Description("Remove a device from the project")]
+        public static ResponseRemoveDevice RemoveDevice(
+            [Description("devicePath: defines the path in the project structure to the device (e.g. 'PLC_1')")] string devicePath)
+        {
+            try
+            {
+                Portal.RemoveDevice(devicePath);
+
+                return new ResponseRemoveDevice
+                {
+                    Message = $"Device '{devicePath}' removed successfully",
+                    Meta = new JsonObject
+                    {
+                        ["timestamp"] = DateTime.Now,
+                        ["success"] = true
+                    }
+                };
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Failed to remove device '{devicePath}': {ex.Message}", ex, McpErrorCode.InternalError);
+            }
+        }
+
+        [McpServerTool(Name = "CreateSubnet"), Description("Create a new subnet (PROFINET, Ethernet, etc.) in the project")]
+        public static ResponseCreateSubnet CreateSubnet(
+            [Description("typeIdentifier: the subnet type (e.g. 'System:Subnet.Ethernet' or 'System:Subnet.Profinet')")] string typeIdentifier,
+            [Description("name: the name for the new subnet")] string name)
+        {
+            try
+            {
+                Portal.CreateSubnet(typeIdentifier, name);
+
+                return new ResponseCreateSubnet
+                {
+                    Message = $"Subnet '{name}' created successfully with type '{typeIdentifier}'",
+                    Meta = new JsonObject
+                    {
+                        ["timestamp"] = DateTime.Now,
+                        ["success"] = true
+                    }
+                };
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Failed to create subnet '{name}': {ex.Message}", ex, McpErrorCode.InternalError);
+            }
+        }
+
+        [McpServerTool(Name = "ConnectToSubnet"), Description("Connect a device's network interface to a subnet")]
+        public static ResponseConnectToSubnet ConnectToSubnet(
+            [Description("devicePath: defines the path in the project structure to the device (e.g. 'PLC_1')")] string devicePath,
+            [Description("interfaceName: the name of the network interface or device item with the interface")] string interfaceName,
+            [Description("subnetName: the name of the target subnet to connect to")] string subnetName)
+        {
+            try
+            {
+                Portal.ConnectToSubnet(devicePath, interfaceName, subnetName);
+
+                return new ResponseConnectToSubnet
+                {
+                    Message = $"Connected '{devicePath}/{interfaceName}' to subnet '{subnetName}'",
+                    Meta = new JsonObject
+                    {
+                        ["timestamp"] = DateTime.Now,
+                        ["success"] = true
+                    }
+                };
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Failed to connect to subnet: {ex.Message}", ex, McpErrorCode.InternalError);
+            }
+        }
+
+        [McpServerTool(Name = "SetNetworkAttribute"), Description("Set a network attribute (e.g. IP address) on a device's network interface")]
+        public static ResponseSetNetworkAttribute SetNetworkAttribute(
+            [Description("devicePath: defines the path in the project structure to the device (e.g. 'PLC_1')")] string devicePath,
+            [Description("interfaceName: the name of the network interface or device item")] string interfaceName,
+            [Description("attributeName: the name of the attribute to set (e.g. 'Address')")] string attributeName,
+            [Description("attributeValue: the value to set")] string attributeValue)
+        {
+            try
+            {
+                Portal.SetNetworkAttribute(devicePath, interfaceName, attributeName, attributeValue);
+
+                return new ResponseSetNetworkAttribute
+                {
+                    Message = $"Set {attributeName}='{attributeValue}' on '{devicePath}/{interfaceName}'",
+                    Meta = new JsonObject
+                    {
+                        ["timestamp"] = DateTime.Now,
+                        ["success"] = true
+                    }
+                };
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Failed to set network attribute: {ex.Message}", ex, McpErrorCode.InternalError);
+            }
+        }
+
+        #endregion
+
+        #region download & online (Phase 6)
+
+        [McpServerTool(Name = "DownloadToDevice"), Description("Download the software to the device (PLC). Requires an online connection to the target device.")]
+        public static ResponseDownloadToDevice DownloadToDevice(
+            [Description("softwarePath: defines the path in the project structure to the plc software")] string softwarePath)
+        {
+            try
+            {
+                var result = Portal.DownloadToDevice(softwarePath);
+
+                return new ResponseDownloadToDevice
+                {
+                    Message = $"Download completed with state: {(result.ContainsKey("State") ? result["State"] : "Unknown")}",
+                    Items = result,
+                    Meta = new JsonObject
+                    {
+                        ["timestamp"] = DateTime.Now,
+                        ["success"] = true
+                    }
+                };
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Download failed: {ex.Message}", ex, McpErrorCode.InternalError);
+            }
+        }
+
+        [McpServerTool(Name = "GoOnline"), Description("Go online with a device to monitor and diagnose")]
+        public static ResponseGoOnline GoOnline(
+            [Description("softwarePath: defines the path in the project structure to the plc software")] string softwarePath)
+        {
+            try
+            {
+                var result = Portal.GoOnline(softwarePath);
+
+                return new ResponseGoOnline
+                {
+                    Message = $"Online connection established. State: {(result.ContainsKey("State") ? result["State"] : "Unknown")}",
+                    Items = result,
+                    Meta = new JsonObject
+                    {
+                        ["timestamp"] = DateTime.Now,
+                        ["success"] = true
+                    }
+                };
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Go online failed: {ex.Message}", ex, McpErrorCode.InternalError);
+            }
+        }
+
+        [McpServerTool(Name = "GoOffline"), Description("Go offline - disconnect from the device")]
+        public static ResponseGoOffline GoOffline(
+            [Description("softwarePath: defines the path in the project structure to the plc software")] string softwarePath)
+        {
+            try
+            {
+                Portal.GoOffline(softwarePath);
+
+                return new ResponseGoOffline
+                {
+                    Message = "Disconnected from device (offline)",
+                    Meta = new JsonObject
+                    {
+                        ["timestamp"] = DateTime.Now,
+                        ["success"] = true
+                    }
+                };
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Go offline failed: {ex.Message}", ex, McpErrorCode.InternalError);
+            }
+        }
+
+        #endregion
+
+        #region safety (Phase 7)
+
+        [McpServerTool(Name = "GetSafetyInfo"), Description("Get safety information for a PLC device (F-CPU)")]
+        public static ResponseSafetyInfo GetSafetyInfo(
+            [Description("softwarePath: defines the path in the project structure to the plc software")] string softwarePath)
+        {
+            try
+            {
+                var result = Portal.GetSafetyInfo(softwarePath);
+
+                return new ResponseSafetyInfo
+                {
+                    Message = (result.ContainsKey("SafetySupported") ? result["SafetySupported"] : "false") == "true"
+                        ? "Safety information retrieved"
+                        : "Device does not support safety",
+                    Items = result,
+                    Meta = new JsonObject
+                    {
+                        ["timestamp"] = DateTime.Now,
+                        ["success"] = true
+                    }
+                };
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Failed to get safety info: {ex.Message}", ex, McpErrorCode.InternalError);
+            }
+        }
+
+        [McpServerTool(Name = "CompileSafety"), Description("Compile safety program for an F-CPU (requires safety password)")]
+        public static ResponseCompileSafety CompileSafety(
+            [Description("softwarePath: defines the path in the project structure to the plc software")] string softwarePath,
+            [Description("password: the safety password to access the safety offline program")] string password = "")
+        {
+            try
+            {
+                var result = Portal.CompileSafety(softwarePath, password);
+
+                return new ResponseCompileSafety
+                {
+                    Message = $"Safety compilation completed with state: {(result.ContainsKey("State") ? result["State"] : "Unknown")}",
+                    Items = result,
+                    Meta = new JsonObject
+                    {
+                        ["timestamp"] = DateTime.Now,
+                        ["success"] = true
+                    }
+                };
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Safety compilation failed: {ex.Message}", ex, McpErrorCode.InternalError);
+            }
+        }
+
+        #endregion
+
+        #region hardware catalog (Phase 8)
+
+        [McpServerTool(Name = "SearchHardwareCatalog"), Description("Search the TIA Portal hardware catalog for devices by name or order number")]
+        public static ResponseSearchHardwareCatalog SearchHardwareCatalog(
+            [Description("searchText: text to search for in device names or type identifiers (e.g. '1517' or 'S7-1500')")] string searchText)
+        {
+            try
+            {
+                var list = Portal.SearchHardwareCatalog(searchText);
+
+                return new ResponseSearchHardwareCatalog
+                {
+                    Message = $"Found {list.Count} catalog entries matching '{searchText}'",
+                    Items = list,
+                    Meta = new JsonObject
+                    {
+                        ["timestamp"] = DateTime.Now,
+                        ["success"] = true
+                    }
+                };
+            }
+            catch (Exception ex) when (ex is not McpException)
+            {
+                throw new McpException($"Failed to search hardware catalog: {ex.Message}", ex, McpErrorCode.InternalError);
+            }
+        }
+
+        #endregion
     }
 }
 

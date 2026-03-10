@@ -268,4 +268,56 @@ namespace TiaMcpServer.ModelContextProtocol
     {
         public IEnumerable<Dictionary<string, string>>? Items { get; set; }
     }
+
+    public class ResponseAddDevice : ResponseMessage
+    {
+    }
+
+    public class ResponseRemoveDevice : ResponseMessage
+    {
+    }
+
+    public class ResponseCreateSubnet : ResponseMessage
+    {
+    }
+
+    public class ResponseConnectToSubnet : ResponseMessage
+    {
+    }
+
+    public class ResponseSetNetworkAttribute : ResponseMessage
+    {
+    }
+
+    // Phase 6 — Download & Online
+    public class ResponseDownloadToDevice : ResponseMessage
+    {
+        public Dictionary<string, string>? Items { get; set; }
+    }
+
+    public class ResponseGoOnline : ResponseMessage
+    {
+        public Dictionary<string, string>? Items { get; set; }
+    }
+
+    public class ResponseGoOffline : ResponseMessage
+    {
+    }
+
+    // Phase 7 — Safety
+    public class ResponseSafetyInfo : ResponseMessage
+    {
+        public Dictionary<string, string>? Items { get; set; }
+    }
+
+    public class ResponseCompileSafety : ResponseMessage
+    {
+        public Dictionary<string, string>? Items { get; set; }
+    }
+
+    // Phase 8 — Hardware Catalog
+    public class ResponseSearchHardwareCatalog : ResponseMessage
+    {
+        public IEnumerable<Dictionary<string, string>>? Items { get; set; }
+    }
 }

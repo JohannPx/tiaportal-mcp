@@ -8,6 +8,9 @@ using Siemens.Engineering.HW.Features;
 using Siemens.Engineering.Library;
 using Siemens.Engineering.Library.MasterCopies;
 using Siemens.Engineering.Multiuser;
+using Siemens.Engineering.Download;
+using Siemens.Engineering.Download.Configurations;
+using Siemens.Engineering.Online;
 using Siemens.Engineering.Safety;
 using Siemens.Engineering.SW;
 using Siemens.Engineering.SW.Blocks;
@@ -3613,6 +3616,579 @@ namespace TiaMcpServer.Siemens
         }
 
         #endregion
+
+        #endregion
+
+        #region hardware & network write
+
+        public Device AddDevice(string typeIdentifier, string deviceName, string name)
+        {
+            _logger?.LogInformation($"Adding device: {deviceName} ({typeIdentifier})");
+
+            if (IsProjectNull())
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, "No project is open");
+            }
+
+            if (_project is not Project project)
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, "Cannot add device to multiuser session");
+            }
+
+            try
+            {
+                var device = project.Devices.CreateWithItem(typeIdentifier, name, deviceName);
+                _logger?.LogInformation($"Device '{deviceName}' added successfully");
+                return device;
+            }
+            catch (Exception ex)
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, $"Failed to add device '{deviceName}': {ex.Message}");
+            }
+        }
+
+        public void RemoveDevice(string devicePath)
+        {
+            _logger?.LogInformation($"Removing device: {devicePath}");
+
+            if (IsProjectNull())
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, "No project is open");
+            }
+
+            var device = GetDeviceByPath(devicePath);
+            if (device == null)
+            {
+                throw new PortalException(PortalErrorCode.NotFound, $"Device '{devicePath}' not found");
+            }
+
+            try
+            {
+                device.Delete();
+                _logger?.LogInformation($"Device '{devicePath}' removed successfully");
+            }
+            catch (Exception ex)
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, $"Failed to remove device '{devicePath}': {ex.Message}");
+            }
+        }
+
+        public Subnet CreateSubnet(string typeIdentifier, string name)
+        {
+            _logger?.LogInformation($"Creating subnet: {name} ({typeIdentifier})");
+
+            if (IsProjectNull())
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, "No project is open");
+            }
+
+            if (_project is not Project project)
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, "Cannot create subnet in multiuser session");
+            }
+
+            try
+            {
+                var subnet = project.Subnets.Create(typeIdentifier, name);
+                _logger?.LogInformation($"Subnet '{name}' created successfully");
+                return subnet;
+            }
+            catch (Exception ex)
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, $"Failed to create subnet '{name}': {ex.Message}");
+            }
+        }
+
+        public void ConnectToSubnet(string devicePath, string interfaceName, string subnetName)
+        {
+            _logger?.LogInformation($"Connecting {devicePath}/{interfaceName} to subnet {subnetName}");
+
+            if (IsProjectNull())
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, "No project is open");
+            }
+
+            if (_project is not Project project)
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, "Cannot connect to subnet in multiuser session");
+            }
+
+            // Find the subnet
+            Subnet? subnet = null;
+            foreach (var s in project.Subnets)
+            {
+                if (s.Name == subnetName)
+                {
+                    subnet = s;
+                    break;
+                }
+            }
+            if (subnet == null)
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, $"Subnet '{subnetName}' not found");
+            }
+
+            // Find the device and interface
+            var device = GetDeviceByPath(devicePath);
+            if (device == null)
+            {
+                throw new PortalException(PortalErrorCode.NotFound, $"Device '{devicePath}' not found");
+            }
+
+            try
+            {
+                var node = FindNetworkNode(device.DeviceItems, interfaceName);
+                if (node == null)
+                {
+                    throw new PortalException(PortalErrorCode.InvalidState, $"Network interface '{interfaceName}' not found on device '{devicePath}'");
+                }
+
+                node.ConnectToSubnet(subnet);
+                _logger?.LogInformation($"Connected '{devicePath}/{interfaceName}' to subnet '{subnetName}'");
+            }
+            catch (PortalException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, $"Failed to connect to subnet: {ex.Message}");
+            }
+        }
+
+        private Node? FindNetworkNode(DeviceItemComposition items, string interfaceName)
+        {
+            foreach (DeviceItem item in items)
+            {
+                try
+                {
+                    var netInterface = item.GetService<NetworkInterface>();
+                    if (netInterface != null)
+                    {
+                        foreach (var node in netInterface.Nodes)
+                        {
+                            if (item.Name == interfaceName || node.Name == interfaceName)
+                            {
+                                return node;
+                            }
+                        }
+                    }
+                }
+                catch (Exception) { }
+
+                // Recurse
+                if (item.DeviceItems != null && item.DeviceItems.Count > 0)
+                {
+                    var result = FindNetworkNode(item.DeviceItems, interfaceName);
+                    if (result != null) return result;
+                }
+            }
+            return null;
+        }
+
+        public void SetNetworkAttribute(string devicePath, string interfaceName, string attributeName, string attributeValue)
+        {
+            _logger?.LogInformation($"Setting {attributeName}={attributeValue} on {devicePath}/{interfaceName}");
+
+            if (IsProjectNull())
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, "No project is open");
+            }
+
+            var device = GetDeviceByPath(devicePath);
+            if (device == null)
+            {
+                throw new PortalException(PortalErrorCode.NotFound, $"Device '{devicePath}' not found");
+            }
+
+            try
+            {
+                var node = FindNetworkNode(device.DeviceItems, interfaceName);
+                if (node == null)
+                {
+                    throw new PortalException(PortalErrorCode.InvalidState, $"Network interface '{interfaceName}' not found on device '{devicePath}'");
+                }
+
+                ((IEngineeringObject)node).SetAttribute(attributeName, attributeValue);
+                _logger?.LogInformation($"Set {attributeName}={attributeValue} on '{devicePath}/{interfaceName}'");
+            }
+            catch (PortalException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, $"Failed to set attribute: {ex.Message}");
+            }
+        }
+
+        #endregion
+
+        #region download & online (Phase 6)
+
+        public Dictionary<string, string> DownloadToDevice(string softwarePath)
+        {
+            _logger?.LogInformation($"Downloading to device for: {softwarePath}");
+
+            if (IsProjectNull())
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, "No project is open");
+            }
+
+            var softwareContainer = GetSoftwareContainer(softwarePath);
+            if (softwareContainer == null)
+            {
+                throw new PortalException(PortalErrorCode.NotFound, $"Software not found at '{softwarePath}'");
+            }
+
+            try
+            {
+                if (softwareContainer.Software is not PlcSoftware plcSoftware)
+                {
+                    throw new PortalException(PortalErrorCode.InvalidState, "Software is not PLC software");
+                }
+
+                var downloadProvider = plcSoftware.GetService<DownloadProvider>();
+                if (downloadProvider == null)
+                {
+                    throw new PortalException(PortalErrorCode.InvalidState, "Download provider not available for this software");
+                }
+
+                // Configure download: accept all default options
+                DownloadConfigurationDelegate preDownloadConfig = delegate (DownloadConfiguration config)
+                {
+                    // Accept defaults — no changes needed
+                };
+
+                // Use the simple Download overload with DirectoryInfo (temp dir for download staging)
+                var tempDir = new DirectoryInfo(Path.GetTempPath());
+                var result = downloadProvider.Download(tempDir, preDownloadConfig);
+
+                var info = new Dictionary<string, string>
+                {
+                    ["State"] = result.State.ToString(),
+                    ["WarningCount"] = result.WarningCount.ToString(),
+                    ["ErrorCount"] = result.ErrorCount.ToString()
+                };
+
+                foreach (DownloadResultMessage msg in result.Messages)
+                {
+                    try
+                    {
+                        info[$"Message_{msg.DateTime:HHmmss}"] = msg.Message;
+                    }
+                    catch (Exception) { }
+                }
+
+                return info;
+            }
+            catch (PortalException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, $"Download failed: {ex.Message}");
+            }
+        }
+
+        public Dictionary<string, string> GoOnline(string softwarePath)
+        {
+            _logger?.LogInformation($"Going online for: {softwarePath}");
+
+            if (IsProjectNull())
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, "No project is open");
+            }
+
+            var softwareContainer = GetSoftwareContainer(softwarePath);
+            if (softwareContainer == null)
+            {
+                throw new PortalException(PortalErrorCode.NotFound, $"Software not found at '{softwarePath}'");
+            }
+
+            try
+            {
+                if (softwareContainer.Software is not PlcSoftware plcSoftwareOnline)
+                {
+                    throw new PortalException(PortalErrorCode.InvalidState, "Software is not PLC software");
+                }
+
+                var onlineProvider = plcSoftwareOnline.GetService<OnlineProvider>();
+                if (onlineProvider == null)
+                {
+                    throw new PortalException(PortalErrorCode.InvalidState, "Online provider not available for this software");
+                }
+
+                onlineProvider.GoOnline();
+
+                var info = new Dictionary<string, string>
+                {
+                    ["State"] = onlineProvider.State.ToString()
+                };
+
+                return info;
+            }
+            catch (PortalException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, $"Go online failed: {ex.Message}");
+            }
+        }
+
+        public void GoOffline(string softwarePath)
+        {
+            _logger?.LogInformation($"Going offline for: {softwarePath}");
+
+            if (IsProjectNull())
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, "No project is open");
+            }
+
+            var softwareContainer = GetSoftwareContainer(softwarePath);
+            if (softwareContainer == null)
+            {
+                throw new PortalException(PortalErrorCode.NotFound, $"Software not found at '{softwarePath}'");
+            }
+
+            try
+            {
+                if (softwareContainer.Software is not PlcSoftware plcSoftwareOff)
+                {
+                    throw new PortalException(PortalErrorCode.InvalidState, "Software is not PLC software");
+                }
+
+                var onlineProviderOff = plcSoftwareOff.GetService<OnlineProvider>();
+                if (onlineProviderOff == null)
+                {
+                    throw new PortalException(PortalErrorCode.InvalidState, "Online provider not available for this software");
+                }
+
+                onlineProviderOff.GoOffline();
+            }
+            catch (PortalException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, $"Go offline failed: {ex.Message}");
+            }
+        }
+
+        #endregion
+
+        #region safety (Phase 7)
+
+        public Dictionary<string, string> GetSafetyInfo(string softwarePath)
+        {
+            _logger?.LogInformation($"Getting safety info for: {softwarePath}");
+
+            if (IsProjectNull())
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, "No project is open");
+            }
+
+            var softwareContainer = GetSoftwareContainer(softwarePath);
+            if (softwareContainer == null)
+            {
+                throw new PortalException(PortalErrorCode.NotFound, $"Software not found at '{softwarePath}'");
+            }
+
+            var info = new Dictionary<string, string>();
+
+            try
+            {
+                var deviceItem = softwareContainer.Parent as DeviceItem;
+                var admin = deviceItem?.GetService<SafetyAdministration>();
+
+                if (admin == null)
+                {
+                    info["SafetySupported"] = "false";
+                    return info;
+                }
+
+                info["SafetySupported"] = "true";
+                info["IsLoggedOn"] = admin.IsLoggedOnToSafetyOfflineProgram.ToString();
+
+                try
+                {
+                    foreach (var attr in ((IEngineeringObject)admin).GetAttributeInfos())
+                    {
+                        try
+                        {
+                            var val = ((IEngineeringObject)admin).GetAttribute(attr.Name);
+                            if (val != null)
+                            {
+                                info[attr.Name] = val.ToString() ?? "";
+                            }
+                        }
+                        catch (Exception) { }
+                    }
+                }
+                catch (Exception) { }
+            }
+            catch (PortalException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, $"Failed to get safety info: {ex.Message}");
+            }
+
+            return info;
+        }
+
+        public Dictionary<string, string> CompileSafety(string softwarePath, string password)
+        {
+            _logger?.LogInformation($"Compiling safety for: {softwarePath}");
+
+            if (IsProjectNull())
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, "No project is open");
+            }
+
+            var softwareContainer = GetSoftwareContainer(softwarePath);
+            if (softwareContainer == null)
+            {
+                throw new PortalException(PortalErrorCode.NotFound, $"Software not found at '{softwarePath}'");
+            }
+
+            try
+            {
+                var deviceItem = softwareContainer.Parent as DeviceItem;
+                var admin = deviceItem?.GetService<SafetyAdministration>();
+
+                if (admin == null)
+                {
+                    throw new PortalException(PortalErrorCode.InvalidState, "Safety administration not available for this device");
+                }
+
+                // Login if needed
+                if (!admin.IsLoggedOnToSafetyOfflineProgram && !string.IsNullOrEmpty(password))
+                {
+                    SecureString secString = new NetworkCredential("", password).SecurePassword;
+                    admin.LoginToSafetyOfflineProgram(secString);
+                }
+
+                // Compile
+                if (softwareContainer.Software is not PlcSoftware plcSoftwareSafety)
+                {
+                    throw new PortalException(PortalErrorCode.InvalidState, "Software is not PLC software");
+                }
+                var compilable = plcSoftwareSafety.GetService<ICompilable>();
+                if (compilable == null)
+                {
+                    throw new PortalException(PortalErrorCode.InvalidState, "Software is not compilable");
+                }
+
+                var result = compilable.Compile();
+
+                var info = new Dictionary<string, string>
+                {
+                    ["State"] = result.State.ToString(),
+                    ["WarningCount"] = result.WarningCount.ToString(),
+                    ["ErrorCount"] = result.ErrorCount.ToString()
+                };
+
+                return info;
+            }
+            catch (PortalException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, $"Safety compilation failed: {ex.Message}");
+            }
+        }
+
+        #endregion
+
+        #region hardware catalog (Phase 8)
+
+        public List<Dictionary<string, string>> SearchHardwareCatalog(string searchText)
+        {
+            _logger?.LogInformation($"Searching hardware catalog for: {searchText}");
+
+            var list = new List<Dictionary<string, string>>();
+
+            if (IsProjectNull())
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, "No project is open");
+            }
+
+            if (_project is not Project project)
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, "Cannot access hardware catalog in multiuser session");
+            }
+
+            try
+            {
+                // In V20 Openness, devices already in the project can be listed.
+                // For catalog search, we enumerate existing devices and their TypeIdentifiers.
+                // The HardwareCatalog class in V20 requires browsing via attributes.
+                foreach (var device in project.Devices)
+                {
+                    try
+                    {
+                        var name = device.Name ?? "";
+                        var typeId = device.TypeIdentifier ?? "";
+
+                        if (name.IndexOf(searchText, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            typeId.IndexOf(searchText, StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            list.Add(new Dictionary<string, string>
+                            {
+                                ["Name"] = name,
+                                ["TypeIdentifier"] = typeId,
+                                ["Source"] = "Project"
+                            });
+                        }
+                    }
+                    catch (Exception) { }
+                }
+
+                // Try to access HardwareCatalog if available
+                try
+                {
+                    foreach (var utility in project.HwUtilities)
+                    {
+                        try
+                        {
+                            var utilName = ((IEngineeringObject)utility).GetAttribute("Name")?.ToString() ?? "";
+                            var utilType = utility.GetType().Name;
+
+                            if (utilName.IndexOf(searchText, StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                list.Add(new Dictionary<string, string>
+                                {
+                                    ["Name"] = utilName,
+                                    ["Type"] = utilType,
+                                    ["Source"] = "HwUtilities"
+                                });
+                            }
+                        }
+                        catch (Exception) { }
+                    }
+                }
+                catch (Exception) { }
+            }
+            catch (PortalException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new PortalException(PortalErrorCode.InvalidState, $"Failed to search hardware catalog: {ex.Message}");
+            }
+
+            return list;
+        }
 
         #endregion
 
